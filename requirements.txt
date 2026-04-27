@@ -1,0 +1,3 @@
+mitmproxy>=10.0
+# Optional: peek inside Unity asset bundles. Capture works without it.
+# UnityPy>=1.10
