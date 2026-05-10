@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in vrchat-net-capture is not working as expected.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check the README and wiki: https://github.com/RealWhyKnot/vrchat-net-capture/wiki
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        Steps to reproduce:
+        1. ...
+        2. ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: vrchat-net-capture version or commit
+      placeholder: e.g. latest release tag, version.txt, or main @ <sha>
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, VRChat/SteamVR/Unity/.NET/Python versions, hardware, or other context relevant to this repo.
+      placeholder: |
+        OS:
+        App/runtime version:
+        Hardware/context:
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or console output
+      description: Paste relevant logs, build errors, stack traces, or screenshots. Redact tokens and private URLs.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Links, screenshots, suspected cause, or workarounds tried.
