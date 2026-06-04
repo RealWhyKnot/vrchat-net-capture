@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before filing, check the README and wiki: https://github.com/RealWhyKnot/vrchat-net-capture/wiki
+        Before filing, check the README: https://github.com/RealWhyKnot/vrchat-net-capture#readme
 
   - type: textarea
     id: what-happened

@@ -7,7 +7,7 @@
 ## Checklist
 
 - [ ] Run the documented capture script or Python checks before opening a PR.
-- [ ] Updated README, CHANGELOG, or wiki pages if behavior/setup changed.
+- [ ] Updated README or CHANGELOG if behavior/setup changed.
 - [ ] Added or updated tests where the change is risky or user-facing.
 - [ ] No unrelated formatting, generated files, or local-only output included.
 

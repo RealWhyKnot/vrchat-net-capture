@@ -1,8 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Wiki
-    url: https://github.com/RealWhyKnot/vrchat-net-capture/wiki
-    about: Setup, troubleshooting, and project notes live in the wiki.
   - name: Security report
     url: https://github.com/RealWhyKnot/vrchat-net-capture/security/advisories/new
     about: Report vulnerabilities privately instead of opening a public issue.
