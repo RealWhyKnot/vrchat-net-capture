@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Reject commit subjects that contain more than one build-version stamp.
+
+set -euo pipefail
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+
+subject="$(grep -m1 -vE '^(#|$)' "$msg_file" || true)"
+[ -n "$subject" ] || exit 0
+
+pattern='\([0-9]{4}\.[0-9]+\.[0-9]+\.[0-9]+(-([A-Fa-f0-9]{4}|beta))?\)'
+count=$( ( printf '%s\n' "$subject" | grep -oE "$pattern" || true ) | grep -c . || true )
+count=${count//[^0-9]/}
+[ -n "$count" ] || count=0
+
+if [ "${count:-0}" -gt 1 ]; then
+  echo "" >&2
+  echo "commit-msg: subject contains $count build-version stamps; expected at most one." >&2
+  echo "" >&2
+  echo "  subject: $subject" >&2
+  echo "" >&2
+  echo "Remove stale version trailers so only one (YYYY.M.D.N...) stamp remains." >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0

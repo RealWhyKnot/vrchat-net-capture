@@ -34,6 +34,7 @@ from capture_utils import append_jsonl, decode_response, unitypy_peek, write_per
 # Optional UnityPy peek — best-effort, never fatal.
 try:
     import UnityPy  # type: ignore
+
     _HAVE_UNITYPY = True
 except Exception:
     _HAVE_UNITYPY = False
@@ -98,9 +99,7 @@ class CaptureAddon:
         if not self.capture_dir:
             return
         try:
-            (self.capture_dir / "flows.json").write_text(
-                json.dumps(self._records, indent=2), encoding="utf-8"
-            )
+            (self.capture_dir / "flows.json").write_text(json.dumps(self._records, indent=2), encoding="utf-8")
             ctx.log.info(f"capture_addon: wrote {len(self._records)} flows to flows.json")
         except Exception as e:
             ctx.log.error(f"capture_addon: failed to write flows.json: {e}")
@@ -111,18 +110,14 @@ class CaptureAddon:
         try:
             self._record_flow(flow)
         except Exception:
-            ctx.log.error(
-                "capture_addon: error while recording flow:\n" + traceback.format_exc()
-            )
+            ctx.log.error("capture_addon: error while recording flow:\n" + traceback.format_exc())
 
     def error(self, flow: http.HTTPFlow) -> None:
         # Connection-level errors — log them too, with whatever request/response we have.
         try:
             self._record_flow(flow, errored=True)
         except Exception:
-            ctx.log.error(
-                "capture_addon: error while recording errored flow:\n" + traceback.format_exc()
-            )
+            ctx.log.error("capture_addon: error while recording errored flow:\n" + traceback.format_exc())
 
     # -----------------------------------------------------------------------
 
@@ -138,9 +133,7 @@ class CaptureAddon:
 
         ts_start = float(getattr(req, "timestamp_start", time.time()) or time.time())
         ts_end = float(
-            (getattr(resp, "timestamp_end", None) if resp else None)
-            or getattr(req, "timestamp_end", None)
-            or ts_start
+            (getattr(resp, "timestamp_end", None) if resp else None) or getattr(req, "timestamp_end", None) or ts_start
         )
 
         # Bodies: mitmproxy auto-decompresses for us when we touch .content.
@@ -229,6 +222,7 @@ class CaptureAddon:
         if not path.exists():
             path.write_bytes(data)
         return h
+
 
 # mitmproxy plugin contract
 addons = [CaptureAddon()]

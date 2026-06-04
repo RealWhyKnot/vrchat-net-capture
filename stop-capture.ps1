@@ -35,19 +35,21 @@ $session = $null
 if (Test-Path $LatestPointer) {
     try {
         $session = (Get-Content $LatestPointer -Raw | ConvertFrom-Json).session_dir
-    } catch {}
+    }
+    catch {}
 }
 if (-not $session -or -not (Test-Path $session)) {
     $candidate = Get-ChildItem $CaptureRoot -Directory -ErrorAction SilentlyContinue |
-                 Where-Object { Test-Path (Join-Path $_.FullName '.previous-proxy.json') } |
-                 Sort-Object LastWriteTime -Descending |
-                 Select-Object -First 1
+        Where-Object { Test-Path (Join-Path $_.FullName '.previous-proxy.json') } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
     if ($candidate) { $session = $candidate.FullName }
 }
 
 if (-not $session) {
     Write-Warn2 "no session with .previous-proxy.json found -- won't restore anything."
-} else {
+}
+else {
     Write-Step "restoring proxy from $session"
     $prevFile = Join-Path $session '.previous-proxy.json'
     try {
@@ -56,12 +58,14 @@ if (-not $session) {
         Set-ItemProperty -Path $ProxyKey -Name ProxyEnable -Value $enable -Type DWord
         if ($prev.PSObject.Properties.Match('ProxyServer').Count -and $prev.ProxyServer) {
             Set-ItemProperty -Path $ProxyKey -Name ProxyServer -Value $prev.ProxyServer
-        } else {
+        }
+        else {
             Remove-ItemProperty -Path $ProxyKey -Name ProxyServer -ErrorAction SilentlyContinue
         }
         if ($prev.PSObject.Properties.Match('ProxyOverride').Count -and $prev.ProxyOverride) {
             Set-ItemProperty -Path $ProxyKey -Name ProxyOverride -Value $prev.ProxyOverride
-        } else {
+        }
+        else {
             Remove-ItemProperty -Path $ProxyKey -Name ProxyOverride -ErrorAction SilentlyContinue
         }
         if (-not ([System.Management.Automation.PSTypeName]'WinInet.Settings').Type) {
@@ -73,9 +77,11 @@ public static extern bool InternetSetOption(System.IntPtr hInternet, int dwOptio
         try {
             [WinInet.Settings]::InternetSetOption([System.IntPtr]::Zero, 39, [System.IntPtr]::Zero, 0) | Out-Null
             [WinInet.Settings]::InternetSetOption([System.IntPtr]::Zero, 37, [System.IntPtr]::Zero, 0) | Out-Null
-        } catch {}
+        }
+        catch {}
         Write-Step "proxy restored."
-    } catch {
+    }
+    catch {
         Write-Warn2 "failed to restore proxy: $($_.Exception.Message)"
     }
 
@@ -89,7 +95,8 @@ public static extern bool InternetSetOption(System.IntPtr hInternet, int dwOptio
                 Write-Step "killing orphan mitmdump pid=$procId"
                 Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
             }
-        } catch {}
+        }
+        catch {}
     }
 }
 

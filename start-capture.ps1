@@ -41,7 +41,7 @@ $LatestPointer = Join-Path $CaptureRoot '.latest-session.json'
 
 function Write-Step($msg) { Write-Host "[start-capture] $msg" -ForegroundColor Cyan }
 function Write-Warn2($msg) { Write-Host "[start-capture] WARN: $msg" -ForegroundColor Yellow }
-function Write-Err2($msg)  { Write-Host "[start-capture] ERROR: $msg" -ForegroundColor Red }
+function Write-Err2($msg) { Write-Host "[start-capture] ERROR: $msg" -ForegroundColor Red }
 
 # ---- preflight --------------------------------------------------------------
 
@@ -70,7 +70,8 @@ function Find-Python {
             if ($LASTEXITCODE -eq 0 -and $out -match 'Python 3\.') {
                 return $c
             }
-        } catch {}
+        }
+        catch {}
     }
     return $null
 }
@@ -155,11 +156,13 @@ if (-not $NoCertInstall) {
         try {
             Import-Certificate -FilePath $caPem -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
             Write-Step "  CA installed for current user."
-        } catch {
+        }
+        catch {
             Write-Warn2 "CurrentUser cert install failed: $($_.Exception.Message)"
             Write-Warn2 "HTTPS interception may not work. To install manually: certutil -addstore -user Root '$caPem'"
         }
-    } else {
+    }
+    else {
         Write-Warn2 "mitmproxy CA not found at $caPem after generation step. HTTPS interception will fail."
     }
 }
@@ -169,8 +172,8 @@ if (-not $NoCertInstall) {
 Write-Step "stashing current proxy settings..."
 $prev = Get-ItemProperty -Path $ProxyKey | Select-Object ProxyEnable, ProxyServer, ProxyOverride, AutoConfigURL
 $prevDump = @{
-    ProxyEnable   = if ($prev.PSObject.Properties.Match('ProxyEnable').Count)   { [int]$prev.ProxyEnable }   else { 0 }
-    ProxyServer   = if ($prev.PSObject.Properties.Match('ProxyServer').Count)   { [string]$prev.ProxyServer } else { $null }
+    ProxyEnable   = if ($prev.PSObject.Properties.Match('ProxyEnable').Count) { [int]$prev.ProxyEnable }   else { 0 }
+    ProxyServer   = if ($prev.PSObject.Properties.Match('ProxyServer').Count) { [string]$prev.ProxyServer } else { $null }
     ProxyOverride = if ($prev.PSObject.Properties.Match('ProxyOverride').Count) { [string]$prev.ProxyOverride } else { $null }
     AutoConfigURL = if ($prev.PSObject.Properties.Match('AutoConfigURL').Count) { [string]$prev.AutoConfigURL } else { $null }
 }
@@ -191,7 +194,8 @@ function Notify-WinInet {
     try {
         [WinInet.Settings]::InternetSetOption([System.IntPtr]::Zero, 39, [System.IntPtr]::Zero, 0) | Out-Null # SETTINGS_CHANGED
         [WinInet.Settings]::InternetSetOption([System.IntPtr]::Zero, 37, [System.IntPtr]::Zero, 0) | Out-Null # REFRESH
-    } catch {}
+    }
+    catch {}
 }
 
 function Restore-Proxy {
@@ -199,22 +203,26 @@ function Restore-Proxy {
     try {
         if ($prevDump.ProxyEnable) {
             Set-ItemProperty -Path $ProxyKey -Name ProxyEnable -Value $prevDump.ProxyEnable -Type DWord
-        } else {
+        }
+        else {
             Set-ItemProperty -Path $ProxyKey -Name ProxyEnable -Value 0 -Type DWord
         }
         if ($prevDump.ProxyServer) {
             Set-ItemProperty -Path $ProxyKey -Name ProxyServer -Value $prevDump.ProxyServer
-        } else {
+        }
+        else {
             Remove-ItemProperty -Path $ProxyKey -Name ProxyServer -ErrorAction SilentlyContinue
         }
         if ($prevDump.ProxyOverride) {
             Set-ItemProperty -Path $ProxyKey -Name ProxyOverride -Value $prevDump.ProxyOverride
-        } else {
+        }
+        else {
             Remove-ItemProperty -Path $ProxyKey -Name ProxyOverride -ErrorAction SilentlyContinue
         }
         Notify-WinInet
         Write-Step "proxy restored."
-    } catch {
+    }
+    catch {
         Write-Warn2 "Restore-Proxy failed: $($_.Exception.Message). Edit Internet Options manually if your network is broken."
     }
 }
@@ -228,12 +236,12 @@ Notify-WinInet
 # ---- launch mitmdump --------------------------------------------------------
 
 $mitmArgs = @('--mode', 'regular',
-              '--listen-host', '127.0.0.1',
-              '--listen-port', "$ListenPort",
-              '-s', $AddonPath,
-              '--set', "capture_dir=$CaptureDir",
-              '--set', "ignore_hosts_list=$IgnoreHosts",
-              '--set', 'flow_detail=0')
+    '--listen-host', '127.0.0.1',
+    '--listen-port', "$ListenPort",
+    '-s', $AddonPath,
+    '--set', "capture_dir=$CaptureDir",
+    '--set', "ignore_hosts_list=$IgnoreHosts",
+    '--set', 'flow_detail=0')
 
 $proc = $null
 try {
@@ -251,7 +259,8 @@ try {
             $tcp.Close()
             $ready = $true
             break
-        } catch {
+        }
+        catch {
             Start-Sleep -Milliseconds 250
         }
     }

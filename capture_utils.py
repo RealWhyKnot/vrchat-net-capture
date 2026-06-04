@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 UNITY_MAGICS = (b"UnityFS", b"UnityRaw", b"UnityWeb")
 HEX_PREVIEW_BYTES = 256
@@ -97,9 +98,7 @@ def write_per_host(by_host_dir: Path, record: dict[str, Any]) -> None:
     fid = (record["flow_id"] or "")[:8]
     fname = f"{ts}_{ms:03d}__{record['method']}__{record['status'] or 'ERR'}__{slug}__{fid}.json"
     try:
-        (host_dir / fname).write_text(
-            json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        (host_dir / fname).write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
     except OSError:
         (host_dir / f"{record['flow_id']}.json").write_text(
             json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -110,7 +109,7 @@ def hex_preview(body: bytes) -> str:
     head = body[:HEX_PREVIEW_BYTES]
     hex_lines = []
     for i in range(0, len(head), 16):
-        chunk = head[i:i + 16]
+        chunk = head[i : i + 16]
         hex_part = " ".join(f"{b:02x}" for b in chunk)
         ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
         hex_lines.append(f"{i:08x}  {hex_part:<47}  {ascii_part}")
