@@ -22,6 +22,7 @@ def build_http_record(
     capture_dir: Path,
     bodies_dir: Path,
     decoded_dir: Path,
+    analyze_unity: bool,
     have_unitypy: bool,
     unitypy_loader: Any,
     warn: Any,
@@ -69,7 +70,7 @@ def build_http_record(
             resp_decoded,
             resp.headers.get("content-type") if resp else "",
         )
-        if is_unity_bundle and have_unitypy:
+        if is_unity_bundle and analyze_unity and have_unitypy:
             unitypy_summary_path = unitypy_peek(
                 capture_dir,
                 decoded_dir,

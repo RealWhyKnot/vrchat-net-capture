@@ -72,6 +72,21 @@ class CaptureEventsTests(unittest.TestCase):
         self.assertEqual(summary["statuses"]["ERR"], 1)
         self.assertEqual(summary["errors"]["http_flow"], 1)
         self.assertEqual(summary["errors"]["tls_failed_client"], 1)
+        self.assertEqual(summary["tls_failure_targets"], {})
+
+    def test_build_summary_counts_tls_failure_targets(self) -> None:
+        summary = build_summary(
+            [],
+            [
+                {
+                    "kind": "tls_failed_server",
+                    "connection": {"sni": "example.test", "address": "203.0.113.1:443"},
+                    "error": "certificate verify failed",
+                }
+            ],
+        )
+
+        self.assertEqual(summary["tls_failure_targets"]["example.test"], 1)
 
 
 if __name__ == "__main__":

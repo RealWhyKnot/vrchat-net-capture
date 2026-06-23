@@ -1,0 +1,33 @@
+VRChat Net Capture NOTICE
+
+Copyright (C) 2026 WhyKnot and other contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License v3.0 or later as published by the
+Free Software Foundation. See LICENSE for the full text.
+
+Release archives published from this repository bundle the following third-
+party software. Each item retains its original license, which is GPL-3.0
+compatible. Where a dependency is installed at runtime rather than shipped in
+the release archive, it is listed separately.
+
+============================================================
+.NET runtime and Microsoft libraries (MIT)
+  https://github.com/dotnet/runtime
+  VRChat Net Capture is published as a self-contained Windows binary that
+  includes the .NET runtime and Microsoft libraries such as System.Text.Json.
+============================================================
+
+Runtime dependencies installed by the application or user:
+
+============================================================
+mitmproxy (MIT)
+  https://github.com/mitmproxy/mitmproxy
+  Installed through pip from requirements.txt when missing or when the user
+  accepts the update prompt. It is not bundled in release archives.
+============================================================
+UnityPy (MIT)
+  https://github.com/K0lb3/UnityPy
+  Optional Python package for Unity bundle metadata peeks. The capture works
+  without it, and it is not bundled in release archives.
+============================================================

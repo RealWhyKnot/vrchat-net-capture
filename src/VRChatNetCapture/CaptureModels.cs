@@ -48,6 +48,26 @@ public sealed class SessionMetadata
 
     [JsonPropertyName("mitmproxy")]
     public string? Mitmproxy { get; set; }
+
+    [JsonPropertyName("decode_osc")]
+    public bool DecodeOsc { get; set; }
+
+    [JsonPropertyName("store_osc_values")]
+    public bool StoreOscValues { get; set; }
+
+    [JsonPropertyName("photon_metadata")]
+    public bool PhotonMetadata { get; set; }
+
+    [JsonPropertyName("unity_metadata")]
+    public bool UnityMetadata { get; set; }
+}
+
+public sealed class AnalysisOptions
+{
+    public bool DecodeOsc { get; init; }
+    public bool StoreOscValues { get; init; }
+    public bool PhotonMetadata { get; init; }
+    public bool UnityMetadata { get; init; }
 }
 
 public sealed class CertificateMetadata

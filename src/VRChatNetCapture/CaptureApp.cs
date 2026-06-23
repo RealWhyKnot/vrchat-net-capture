@@ -87,6 +87,8 @@ public sealed class CaptureApp
                 Console.Error.WriteLine("[capture] ERROR: local mode requires mitmproxy 10.2 or newer.");
                 return 1;
             }
+            var analysis = ResolveAnalysisOptions();
+            PrintAnalysisState(analysis);
 
             var cert = await CertificateManager.InitializeAsync(
                 mitmdumpPath,
@@ -121,11 +123,15 @@ public sealed class CaptureApp
                 ListenPort = _options.Mode == "regular" ? _options.ListenPort : null,
                 StartedAt = DateTimeOffset.Now.ToString("O"),
                 Mitmproxy = version,
+                DecodeOsc = analysis.DecodeOsc,
+                StoreOscValues = analysis.StoreOscValues,
+                PhotonMetadata = analysis.PhotonMetadata,
+                UnityMetadata = analysis.UnityMetadata,
             };
             JsonFiles.Write(session.SessionFile, metadata);
             JsonFiles.Write(session.LatestPointer, metadata);
 
-            var args = BuildMitmdumpArguments(_options, _paths, session);
+            var args = BuildMitmdumpArguments(_options, _paths, session, analysis);
             Console.WriteLine("[capture] launching mitmdump...");
             mitmdump = ProcessTools.StartInteractive(mitmdumpPath, args, _paths.AppDir);
             File.WriteAllText(session.PidFile, mitmdump.Id.ToString());
@@ -191,8 +197,19 @@ public sealed class CaptureApp
         return 0;
     }
 
-    public static IReadOnlyList<string> BuildMitmdumpArguments(CaptureOptions options, CapturePaths paths, CaptureSession session)
+    public static IReadOnlyList<string> BuildMitmdumpArguments(
+        CaptureOptions options,
+        CapturePaths paths,
+        CaptureSession session,
+        AnalysisOptions? analysis = null)
     {
+        analysis ??= new AnalysisOptions
+        {
+            DecodeOsc = options.DecodeOsc ?? false,
+            StoreOscValues = options.StoreOscValues,
+            PhotonMetadata = options.PhotonMetadata ?? false,
+            UnityMetadata = options.UnityMetadata ?? false,
+        };
         var args = new List<string>();
         if (options.Mode == "local")
         {
@@ -211,11 +228,62 @@ public sealed class CaptureApp
             "--set",
             $"ignore_hosts_list={options.IgnoreHosts}",
             "--set",
+            $"decode_osc={BoolString(analysis.DecodeOsc)}",
+            "--set",
+            $"store_osc_values={BoolString(analysis.StoreOscValues)}",
+            "--set",
+            $"photon_metadata={BoolString(analysis.PhotonMetadata)}",
+            "--set",
+            $"unity_metadata={BoolString(analysis.UnityMetadata)}",
+            "--set",
             "flow_detail=0",
             "-w",
             Path.Combine(session.CaptureDir, "flows.mitm"),
         ]);
         return args;
+    }
+
+    private AnalysisOptions ResolveAnalysisOptions()
+    {
+        var decodeOsc = ResolveOptIn(
+            _options.DecodeOsc,
+            "Decode observed VRChat OSC UDP datagrams? This does not bind OSC ports. [y/N] ");
+        var storeOscValues = false;
+        if (decodeOsc)
+        {
+            storeOscValues = _options.StoreOscValues ||
+                ResolveOptIn(null, "Store full OSC argument values? No redacts values. [y/N] ");
+        }
+
+        var photonMetadata = ResolveOptIn(
+            _options.PhotonMetadata,
+            "Build Photon-like UDP metadata from captured stream data? Payload semantics are not decoded. [y/N] ");
+        var unityMetadata = ResolveOptIn(
+            _options.UnityMetadata,
+            "Run Unity bundle metadata peeks after detected bundle downloads? No asset export. [y/N] ");
+
+        return new AnalysisOptions
+        {
+            DecodeOsc = decodeOsc,
+            StoreOscValues = storeOscValues,
+            PhotonMetadata = photonMetadata,
+            UnityMetadata = unityMetadata,
+        };
+    }
+
+    private bool ResolveOptIn(bool? explicitValue, string question)
+    {
+        if (explicitValue.HasValue)
+        {
+            return explicitValue.Value;
+        }
+        if (_options.NoAnalysisPrompts || Console.IsInputRedirected)
+        {
+            return false;
+        }
+        Console.Write("[capture] " + question);
+        var answer = Console.ReadLine();
+        return !string.IsNullOrWhiteSpace(answer) && answer.StartsWith("y", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<int> PromptAndUpdateMitmproxyAsync(PythonCommand python)
@@ -395,6 +463,18 @@ public sealed class CaptureApp
     }
 
     private static string AppName() => Path.GetFileName(Environment.ProcessPath) ?? "VRChatNetCapture";
+
+    private static string BoolString(bool value) => value ? "true" : "false";
+
+    private static void PrintAnalysisState(AnalysisOptions analysis)
+    {
+        Console.WriteLine(
+            "[capture] optional analysis: " +
+            $"osc={(analysis.DecodeOsc ? "on" : "off")}, " +
+            $"osc_values={(analysis.StoreOscValues ? "on" : "off")}, " +
+            $"photon_metadata={(analysis.PhotonMetadata ? "on" : "off")}, " +
+            $"unity_metadata={(analysis.UnityMetadata ? "on" : "off")}");
+    }
 
     private static string GetVersion()
     {

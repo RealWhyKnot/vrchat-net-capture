@@ -35,7 +35,7 @@ else {
 $AsmVersion = ($FullVersion -split '-')[0]
 $VersionFile = Join-Path $PSScriptRoot "version.txt"
 [System.IO.File]::WriteAllText($VersionFile, $FullVersion, [System.Text.UTF8Encoding]::new($false))
-Write-Host "Building Version: $FullVersion" -ForegroundColor Magenta
+Write-Host "Building Version: $FullVersion" -ForegroundColor Cyan
 
 if (Test-Path $BuildDir) { Remove-Item $BuildDir -Recurse -Force }
 New-Item -ItemType Directory $BuildDir -Force | Out-Null
@@ -53,7 +53,7 @@ $PubArgs = @(
 dotnet publish "src/VRChatNetCapture/VRChatNetCapture.csproj" @PubArgs
 if ($LASTEXITCODE -ne 0) { throw "VRChatNetCapture publish failed" }
 
-foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE", "version.txt")) {
+foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "version.txt")) {
     Copy-Item (Join-Path $PSScriptRoot $file) (Join-Path $BuildDir $file) -Force
 }
 

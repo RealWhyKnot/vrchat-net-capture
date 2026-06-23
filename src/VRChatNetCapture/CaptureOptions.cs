@@ -12,6 +12,11 @@ public sealed class CaptureOptions
     public bool NoCertInstall { get; init; }
     public bool KeepCert { get; init; }
     public bool NoUpdatePrompt { get; init; }
+    public bool NoAnalysisPrompts { get; init; }
+    public bool? DecodeOsc { get; init; }
+    public bool StoreOscValues { get; init; }
+    public bool? PhotonMetadata { get; init; }
+    public bool? UnityMetadata { get; init; }
     public string? CaptureRoot { get; init; }
     public bool ShowHelp { get; init; }
     public bool ShowVersion { get; init; }
@@ -63,6 +68,30 @@ public sealed class CaptureOptions
                 case "--no-update-prompt":
                     options.NoUpdatePrompt = true;
                     break;
+                case "--no-analysis-prompts":
+                    options.NoAnalysisPrompts = true;
+                    break;
+                case "--decode-osc":
+                    options.DecodeOsc = true;
+                    break;
+                case "--no-decode-osc":
+                    options.DecodeOsc = false;
+                    break;
+                case "--store-osc-values":
+                    options.StoreOscValues = true;
+                    break;
+                case "--photon-metadata":
+                    options.PhotonMetadata = true;
+                    break;
+                case "--no-photon-metadata":
+                    options.PhotonMetadata = false;
+                    break;
+                case "--unity-metadata":
+                    options.UnityMetadata = true;
+                    break;
+                case "--no-unity-metadata":
+                    options.UnityMetadata = false;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown argument '{arg}'.");
             }
@@ -98,6 +127,11 @@ public sealed class CaptureOptions
           --no-cert-install          Skip CurrentUser root CA install.
           --keep-cert                Keep a session-installed CA after stop.
           --no-update-prompt         Do not ask to update mitmproxy dependencies.
+          --decode-osc               Decode observed OSC UDP datagrams.
+          --store-osc-values         Store OSC argument values instead of redacting them.
+          --photon-metadata          Summarize Photon-like UDP stream metadata.
+          --unity-metadata           Run optional Unity bundle metadata peeks.
+          --no-analysis-prompts      Do not ask optional analyzer questions.
           --capture-root <path>      Override captures directory parent.
           --version                  Print version.
           --help                     Print this help.
@@ -122,6 +156,11 @@ public sealed class CaptureOptions
         public bool NoCertInstall { get; set; }
         public bool KeepCert { get; set; }
         public bool NoUpdatePrompt { get; set; }
+        public bool NoAnalysisPrompts { get; set; }
+        public bool? DecodeOsc { get; set; }
+        public bool StoreOscValues { get; set; }
+        public bool? PhotonMetadata { get; set; }
+        public bool? UnityMetadata { get; set; }
         public string? CaptureRoot { get; set; }
         public bool ShowHelp { get; set; }
         public bool ShowVersion { get; set; }
@@ -137,6 +176,11 @@ public sealed class CaptureOptions
                 NoCertInstall = NoCertInstall,
                 KeepCert = KeepCert,
                 NoUpdatePrompt = NoUpdatePrompt,
+                NoAnalysisPrompts = NoAnalysisPrompts,
+                DecodeOsc = DecodeOsc,
+                StoreOscValues = StoreOscValues,
+                PhotonMetadata = PhotonMetadata,
+                UnityMetadata = UnityMetadata,
                 CaptureRoot = CaptureRoot,
                 ShowHelp = ShowHelp,
                 ShowVersion = ShowVersion,

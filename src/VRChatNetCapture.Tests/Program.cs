@@ -4,6 +4,7 @@ var tests = new (string Name, Action Body)[]
 {
     ("default options use local VRChat target", TestDefaultOptions),
     ("stop command parses", TestStopCommand),
+    ("analysis options parse and default off", TestAnalysisOptions),
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
 };
@@ -35,12 +36,36 @@ static void TestDefaultOptions()
     Equal("local", options.Mode);
     Equal("VRChat.exe", options.LocalTarget);
     Equal(8080, options.ListenPort);
+    Equal(null, options.DecodeOsc);
+    Equal(null, options.PhotonMetadata);
+    Equal(null, options.UnityMetadata);
 }
 
 static void TestStopCommand()
 {
     var options = CaptureOptions.Parse(["stop"]);
     Equal("stop", options.Command);
+}
+
+static void TestAnalysisOptions()
+{
+    var enabled = CaptureOptions.Parse([
+        "--decode-osc",
+        "--store-osc-values",
+        "--photon-metadata",
+        "--unity-metadata",
+        "--no-analysis-prompts",
+    ]);
+    Equal(true, enabled.DecodeOsc);
+    True(enabled.StoreOscValues);
+    Equal(true, enabled.PhotonMetadata);
+    Equal(true, enabled.UnityMetadata);
+    True(enabled.NoAnalysisPrompts);
+
+    var disabled = CaptureOptions.Parse(["--no-decode-osc", "--no-photon-metadata", "--no-unity-metadata"]);
+    Equal(false, disabled.DecodeOsc);
+    Equal(false, disabled.PhotonMetadata);
+    Equal(false, disabled.UnityMetadata);
 }
 
 static void TestCertificateRemovalDecision()
@@ -77,6 +102,19 @@ static void TestMitmdumpArgs()
     Contains(regular, "regular");
     Contains(regular, "8081");
     Contains(regular, "ignore_hosts_list=example.test");
+
+    var analysis = new AnalysisOptions
+    {
+        DecodeOsc = true,
+        StoreOscValues = false,
+        PhotonMetadata = true,
+        UnityMetadata = true,
+    };
+    var analysisArgs = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session, analysis);
+    Contains(analysisArgs, "decode_osc=true");
+    Contains(analysisArgs, "store_osc_values=false");
+    Contains(analysisArgs, "photon_metadata=true");
+    Contains(analysisArgs, "unity_metadata=true");
 }
 
 static void True(bool condition)

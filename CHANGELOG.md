@@ -8,6 +8,10 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 - Added `build.ps1`, win-x64 publishing, release zips, manifests, and a tag-driven release workflow.
 - Default capture mode is now mitmproxy local mode targeting `VRChat.exe`; regular Windows proxy mode remains available with `--mode regular`.
 - Startup now asks before updating mitmproxy dependencies.
+- Startup now asks before enabling OSC decoding, Photon-like UDP metadata, and Unity bundle metadata; all default to no.
+- Added OSC datagram decoding for observed UDP stream payloads, with OSC argument values redacted unless explicitly enabled.
+- Added Photon-like UDP metadata summaries for observed stream payloads; payload semantics are not decoded.
 - Session-installed mitmproxy CA certificates are removed on stop by exact thumbprint unless `-KeepCert` is used.
 - Captures now include `events.jsonl`, `events.json`, `summary.json`, `flows.mitm`, WebSocket payloads, stream payloads, and VRChat output-log URL correlation.
 - Consolidated user documentation into README and removed standalone design/recon docs.
+- Changed the project license from MIT to GPL-3.0-or-later and added release notices for bundled/runtime components.

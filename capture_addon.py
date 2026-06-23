@@ -23,6 +23,8 @@ from capture_events import (
     tls_event,
     websocket_event,
 )
+from capture_osc import OscParseError, build_osc_summary, decode_osc_packet
+from capture_photon import build_photon_summary, classify_photon_packet
 from capture_records import build_http_record, save_body, write_websocket_payload
 from capture_utils import append_jsonl, relative_artifact_path, write_per_host
 from capture_vrchat_logs import mark_unmatched_log_urls, newest_output_log, parse_vrchat_log
@@ -46,9 +48,17 @@ class CaptureAddon:
         self.streams_dir: Path | None = None
         self.flows_jsonl: Path | None = None
         self.events_jsonl: Path | None = None
+        self.osc_jsonl: Path | None = None
+        self.photon_jsonl: Path | None = None
         self.ignore_hosts: set[str] = set()
+        self.decode_osc = False
+        self.store_osc_values = False
+        self.photon_metadata = False
+        self.unity_metadata = False
         self._records: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._osc_records: list[dict[str, Any]] = []
+        self._photon_records: list[dict[str, Any]] = []
         self._started = False
 
     def load(self, loader) -> None:
@@ -63,6 +73,30 @@ class CaptureAddon:
             typespec=str,
             default="",
             help="Comma-separated list of hosts to skip recording.",
+        )
+        loader.add_option(
+            name="decode_osc",
+            typespec=bool,
+            default=False,
+            help="Decode OSC datagrams observed in captured UDP streams.",
+        )
+        loader.add_option(
+            name="store_osc_values",
+            typespec=bool,
+            default=False,
+            help="Store decoded OSC argument values instead of redacting them.",
+        )
+        loader.add_option(
+            name="photon_metadata",
+            typespec=bool,
+            default=False,
+            help="Summarize Photon-like UDP stream metadata without decoding payload semantics.",
+        )
+        loader.add_option(
+            name="unity_metadata",
+            typespec=bool,
+            default=False,
+            help="Run optional UnityPy metadata peeks for detected Unity bundles.",
         )
 
     def running(self) -> None:
@@ -81,20 +115,32 @@ class CaptureAddon:
         self.streams_dir = self.capture_dir / "streams"
         self.flows_jsonl = self.capture_dir / "flows.jsonl"
         self.events_jsonl = self.capture_dir / "events.jsonl"
+        self.osc_jsonl = self.capture_dir / "osc-events.jsonl"
+        self.photon_jsonl = self.capture_dir / "photon-packets.jsonl"
         for directory in (self.bodies_dir, self.decoded_dir, self.by_host_dir, self.websockets_dir, self.streams_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
         ignore = (ctx.options.ignore_hosts_list or "").strip()
         if ignore:
             self.ignore_hosts = {h.strip().lower() for h in ignore.split(",") if h.strip()}
+        self.decode_osc = bool(ctx.options.decode_osc)
+        self.store_osc_values = bool(ctx.options.store_osc_values)
+        self.photon_metadata = bool(ctx.options.photon_metadata)
+        self.unity_metadata = bool(ctx.options.unity_metadata)
 
         ctx.log.info(f"capture_addon ready - writing to {self.capture_dir}")
         if self.ignore_hosts:
             ctx.log.info(f"  ignoring hosts: {sorted(self.ignore_hosts)}")
-        if _HAVE_UNITYPY:
-            ctx.log.info("  UnityPy available - will peek at asset bundles")
-        else:
+        if self.decode_osc:
+            ctx.log.info("  OSC decode enabled for captured UDP datagrams")
+        if self.photon_metadata:
+            ctx.log.info("  Photon metadata summary enabled for captured UDP datagrams")
+        if self.unity_metadata and _HAVE_UNITYPY:
+            ctx.log.info("  UnityPy metadata peek enabled for asset bundles")
+        elif self.unity_metadata:
             ctx.log.info("  UnityPy not installed - bundles will be archived raw only")
+        else:
+            ctx.log.info("  Unity bundle metadata analysis disabled")
         self._started = True
 
     def done(self) -> None:
@@ -104,6 +150,19 @@ class CaptureAddon:
             self._write_vrchat_log_correlation()
             (self.capture_dir / "flows.json").write_text(json.dumps(self._records, indent=2), encoding="utf-8")
             (self.capture_dir / "events.json").write_text(json.dumps(self._events, indent=2), encoding="utf-8")
+            if self.decode_osc:
+                (self.capture_dir / "osc-events.json").write_text(
+                    json.dumps(self._osc_records, indent=2), encoding="utf-8"
+                )
+                (self.capture_dir / "osc-summary.json").write_text(
+                    json.dumps(build_osc_summary(self._osc_records), indent=2),
+                    encoding="utf-8",
+                )
+            if self.photon_metadata:
+                (self.capture_dir / "photon-summary.json").write_text(
+                    json.dumps(build_photon_summary(self._photon_records), indent=2),
+                    encoding="utf-8",
+                )
             summary = build_summary(self._records, self._events)
             (self.capture_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             ctx.log.info(f"capture_addon: wrote {len(self._records)} flows and {len(self._events)} events")
@@ -219,6 +278,7 @@ class CaptureAddon:
             self.capture_dir,
             self.bodies_dir,
             self.decoded_dir,
+            self.unity_metadata,
             _HAVE_UNITYPY,
             UnityPy.load if _HAVE_UNITYPY else None,  # type: ignore[union-attr]
             self._warn,
@@ -244,9 +304,56 @@ class CaptureAddon:
                 h = save_body(self.streams_dir, content, suffix=suffix)
                 event["payload_hash"] = h
                 event["payload_path"] = relative_artifact_path(self.capture_dir, self.streams_dir / f"{h}{suffix}")
+                if kind == "udp_message":
+                    self._record_optional_udp_analysis(event, content)
             self._append_event(event)
         except Exception:
             ctx.log.error(f"capture_addon: error while recording {kind}:\n" + traceback.format_exc())
+
+    def _record_optional_udp_analysis(self, event: dict[str, Any], content: bytes) -> None:
+        assert self.capture_dir
+        if self.decode_osc:
+            try:
+                osc = decode_osc_packet(content, include_values=self.store_osc_values)
+                if osc is not None:
+                    event["osc_status"] = "ok"
+                    event["osc_message_count"] = osc["message_count"]
+                    record = self._analysis_record("osc_packet", event, {"osc": osc})
+                    self._osc_records.append(record)
+                    if self.osc_jsonl:
+                        append_jsonl(self.osc_jsonl, record)
+            except OscParseError as exc:
+                event["osc_status"] = "error"
+                record = self._analysis_record("osc_packet", event, {"osc": {"status": "error", "error": str(exc)}})
+                self._osc_records.append(record)
+                if self.osc_jsonl:
+                    append_jsonl(self.osc_jsonl, record)
+
+        if self.photon_metadata:
+            photon = classify_photon_packet(event, content)
+            if photon is not None:
+                event["photon_candidate"] = True
+                event["photon_confidence"] = photon["confidence"]
+                record = self._analysis_record("photon_packet", event, {"photon": photon})
+                self._photon_records.append(record)
+                if self.photon_jsonl:
+                    append_jsonl(self.photon_jsonl, record)
+
+    @staticmethod
+    def _analysis_record(kind: str, event: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "kind": kind,
+            "ts": event.get("ts"),
+            "flow_id": event.get("flow_id"),
+            "direction": event.get("direction"),
+            "client": event.get("client"),
+            "server": event.get("server"),
+            "payload_hash": event.get("payload_hash"),
+            "payload_path": event.get("payload_path"),
+            "size": event.get("size"),
+        }
+        record.update(extra)
+        return record
 
     def _append_event(self, event: dict[str, Any]) -> None:
         assert self.events_jsonl

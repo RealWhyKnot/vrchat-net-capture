@@ -156,6 +156,7 @@ def build_summary(records: list[dict[str, Any]], events: list[dict[str, Any]]) -
     method_counts: Counter[str] = Counter()
     event_counts: Counter[str] = Counter()
     error_counts: Counter[str] = Counter()
+    tls_failure_targets: Counter[str] = Counter()
 
     for record in records:
         host_counts[str(record.get("host") or "_unknown")] += 1
@@ -169,6 +170,10 @@ def build_summary(records: list[dict[str, Any]], events: list[dict[str, Any]]) -
         event_counts[kind] += 1
         if event.get("error"):
             error_counts[kind] += 1
+        if kind.startswith("tls_failed") or kind.endswith("_error"):
+            target = failure_target(event)
+            if target:
+                tls_failure_targets[target] += 1
 
     return {
         "flow_count": len(records),
@@ -178,6 +183,7 @@ def build_summary(records: list[dict[str, Any]], events: list[dict[str, Any]]) -
         "statuses": dict(sorted(status_counts.items())),
         "events": dict(sorted(event_counts.items())),
         "errors": dict(sorted(error_counts.items())),
+        "tls_failure_targets": dict(sorted(tls_failure_targets.items())),
     }
 
 
@@ -219,6 +225,21 @@ def alpn_to_string(alpn: Any) -> str | None:
     if isinstance(alpn, bytes):
         return alpn.decode("ascii", errors="replace")
     return str(alpn)
+
+
+def failure_target(event: dict[str, Any]) -> str | None:
+    host = event.get("host")
+    if host:
+        return str(host)
+    for key in ("connection", "server", "client"):
+        value = event.get(key)
+        if not isinstance(value, dict):
+            continue
+        for field in ("sni", "address", "peername", "sockname"):
+            field_value = value.get(field)
+            if field_value:
+                return str(field_value)
+    return None
 
 
 def payload_preview(content: bytes) -> dict[str, Any] | None:

@@ -41,10 +41,12 @@ Default behavior:
 1. Finds Python.
 2. Installs mitmproxy if missing.
 3. Asks whether to update mitmproxy.
-4. Installs the mitmproxy CA for the current user.
-5. Starts `mitmdump --mode local:VRChat.exe`.
-6. Prints `READY`. Launch VRChat after that.
-7. On Ctrl+C, stops mitmdump and removes the session CA.
+4. Asks whether to enable optional OSC, Photon metadata, and Unity metadata
+   analysis. Each defaults to no.
+5. Installs the mitmproxy CA for the current user.
+6. Starts `mitmdump --mode local:VRChat.exe`.
+7. Prints `READY`. Launch VRChat after that.
+8. On Ctrl+C, stops mitmdump and removes the session CA.
 
 Useful options:
 
@@ -55,6 +57,10 @@ Useful options:
 .\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
 .\VRChatNetCapture.exe --keep-cert
 .\VRChatNetCapture.exe --no-update-prompt
+.\VRChatNetCapture.exe --decode-osc
+.\VRChatNetCapture.exe --photon-metadata
+.\VRChatNetCapture.exe --unity-metadata
+.\VRChatNetCapture.exe --no-analysis-prompts
 .\VRChatNetCapture.exe stop
 ```
 
@@ -72,6 +78,10 @@ captures/<timestamp>/
 |-- events.jsonl                  # CONNECT/TLS/WebSocket/DNS/TCP/UDP events
 |-- events.json                   # event array written at shutdown
 |-- summary.json                  # counts by host/status/event/error
+|-- osc-events.jsonl              # optional decoded OSC datagrams
+|-- osc-summary.json              # optional OSC counts by address/type tag
+|-- photon-packets.jsonl          # optional Photon-like UDP metadata
+|-- photon-summary.json           # optional Photon-like UDP counts
 |-- flows.mitm                    # native mitmproxy dump
 |-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
 |-- vrchat-log-unmatched.jsonl    # log URLs not matched by captured HTTP flows
@@ -111,15 +121,27 @@ Common patterns:
 - Per-search or per-page API requests.
 - WebSocket messages in `events.jsonl` plus payloads in `websockets/`.
 - TLS/connect failures where a target cannot be intercepted.
+- Optional OSC datagrams in `osc-events.jsonl` when OSC decoding is enabled.
+- Optional Photon-like UDP metadata in `photon-packets.jsonl` when Photon
+  metadata is enabled.
 
 ## Limits
 
-- Photon multiplayer traffic is not decoded.
-- OSC loopback traffic is not decoded.
-- Certificate pinning can prevent HTTPS interception. Look for TLS/connect
-  errors and unmatched VRChat log URLs.
-- Unity asset bundles are detected by magic bytes and archived; deep bundle
-  extraction is out of scope.
+- Photon payload semantics are not decoded. With `--photon-metadata`, captured
+  UDP datagrams are classified only as metadata candidates with ports, sizes,
+  direction, and low-confidence header shape guesses. Raw passive packet capture
+  is not implemented yet.
+- OSC decoding is opt-in with `--decode-osc` or the startup prompt. It decodes
+  datagrams already observed by the capture backend and redacts argument values
+  unless `--store-osc-values` is used. It does not bind or compete for VRChat's
+  OSC ports.
+- Certificate pinning can prevent HTTPS interception. Look for
+  `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
+  and unmatched VRChat log URLs.
+- Unity asset bundles are detected by magic bytes and archived. With
+  `--unity-metadata`, UnityPy can write a bounded object-type metadata peek when
+  it is installed. Exporting textures, meshes, audio, video, scripts, scenes, or
+  repacked bundles is out of scope.
 
 ## Development
 
@@ -147,4 +169,5 @@ version stamps.
 
 ## License
 
-[MIT](LICENSE).
+[GPL-3.0-or-later](LICENSE). Release archives also include [NOTICE](NOTICE) for
+bundled and runtime third-party components.
