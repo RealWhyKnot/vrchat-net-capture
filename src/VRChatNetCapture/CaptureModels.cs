@@ -60,6 +60,12 @@ public sealed class SessionMetadata
 
     [JsonPropertyName("unity_metadata")]
     public bool UnityMetadata { get; set; }
+
+    [JsonPropertyName("raw_udp_capture")]
+    public bool RawUdpCapture { get; set; }
+
+    [JsonPropertyName("raw_udp_ports")]
+    public string RawUdpPorts { get; set; } = "";
 }
 
 public sealed class AnalysisOptions
@@ -68,6 +74,8 @@ public sealed class AnalysisOptions
     public bool StoreOscValues { get; init; }
     public bool PhotonMetadata { get; init; }
     public bool UnityMetadata { get; init; }
+    public bool RawUdpCapture { get; init; }
+    public string RawUdpPorts { get; init; } = "";
 }
 
 public sealed class CertificateMetadata

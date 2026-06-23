@@ -4,7 +4,11 @@ namespace VRChatNetCapture;
 
 public static class JsonFiles
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = true,
+    };
 
     public static void Write<T>(string path, T value)
     {

@@ -9,6 +9,7 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 - Default capture mode is now mitmproxy local mode targeting `VRChat.exe`; regular Windows proxy mode remains available with `--mode regular`.
 - Startup now asks before updating mitmproxy dependencies.
 - Startup now asks before enabling OSC decoding, Photon-like UDP metadata, and Unity bundle metadata; all default to no.
+- Added optional passive WinDivert raw UDP capture for selected realtime and OSC ports, with PCAPNG, packet index, and offline OSC/Photon metadata postprocessing.
 - Added OSC datagram decoding for observed UDP stream payloads, with OSC argument values redacted unless explicitly enabled.
 - Added proxy-observed Photon-like UDP metadata summaries for observed stream payloads; payload semantics are not decoded.
 - Stream-derived UDP/TCP analysis records now label `capture_semantics` so proxy-observed data is not confused with passive wire-copy packet capture.

@@ -27,6 +27,8 @@ installed. If that CA already existed before the session, it is left alone. Use
   skipped.
 - mitmproxy 10.2 or newer. If it is missing, the app installs it with pip. On
   startup, the app asks whether to update mitmproxy dependencies.
+- Administrator approval is required only when the optional passive raw UDP
+  packet capture backend is enabled.
 
 ## Usage
 
@@ -60,6 +62,8 @@ Useful options:
 .\VRChatNetCapture.exe --decode-osc
 .\VRChatNetCapture.exe --photon-metadata
 .\VRChatNetCapture.exe --unity-metadata
+.\VRChatNetCapture.exe --raw-udp-capture
+.\VRChatNetCapture.exe --raw-udp-ports 5055,5056,5058,27000-27002,9000,9001
 .\VRChatNetCapture.exe --no-analysis-prompts
 .\VRChatNetCapture.exe stop
 ```
@@ -82,6 +86,12 @@ captures/<timestamp>/
 |-- osc-summary.json              # optional OSC counts by address/type tag
 |-- photon-packets.jsonl          # optional proxy-observed Photon-like UDP metadata
 |-- photon-summary.json           # optional Photon-like UDP counts
+|-- network/realtime-udp.pcapng   # optional passive raw UDP packet capture
+|-- network/packet-index.jsonl    # optional passive packet index
+|-- network/udp-datagrams.jsonl   # optional UDP payload index
+|-- network/payloads/<sha>.udp.bin
+|-- osc/osc-events.jsonl          # optional passive OSC analysis
+|-- photon/photon-packets.jsonl   # optional passive Photon-like metadata
 |-- flows.mitm                    # native mitmproxy dump
 |-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
 |-- vrchat-log-unmatched.jsonl    # log URLs not matched by captured HTTP flows
@@ -124,19 +134,23 @@ Common patterns:
 - Optional OSC datagrams in `osc-events.jsonl` when OSC decoding is enabled.
 - Optional proxy-observed Photon-like UDP metadata in `photon-packets.jsonl`
   when Photon metadata is enabled.
+- Optional passive raw UDP packet evidence under `network/` when
+  `--raw-udp-capture` is enabled.
 
 ## Limits
 
 - Photon payload semantics are not decoded. With `--photon-metadata`,
-  proxy-observed UDP datagrams are classified only as metadata candidates with
-  ports, sizes, direction, and low-confidence header shape guesses. A passive
-  raw packet backend is not implemented yet, so these records use
-  `capture_semantics: "proxy_observed"` rather than `wire_copy`.
+  observed UDP datagrams are classified only as metadata candidates with ports,
+  sizes, direction, and low-confidence header shape guesses. Records under the
+  capture root are `capture_semantics: "proxy_observed"`. Records under
+  `network/` and `photon/` come from the optional passive WinDivert sidecar and
+  use `capture_semantics: "wire_copy"` with `pid_confidence: "none"` until flow
+  PID correlation is added.
 - OSC decoding is opt-in with `--decode-osc` or the startup prompt. It decodes
   datagrams already observed by the capture backend and redacts argument values
   unless `--store-osc-values` is used. It does not bind or compete for VRChat's
-  OSC ports. Until a passive packet backend exists, OSC visibility depends on
-  what the current capture backend observes.
+  OSC ports. If `--raw-udp-capture` is also enabled, offline passive OSC output
+  is written under `osc/`.
 - Certificate pinning can prevent HTTPS interception. Look for
   `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
   and unmatched VRChat log URLs.

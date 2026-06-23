@@ -17,6 +17,8 @@ public sealed class CaptureOptions
     public bool StoreOscValues { get; init; }
     public bool? PhotonMetadata { get; init; }
     public bool? UnityMetadata { get; init; }
+    public bool? RawUdpCapture { get; init; }
+    public string RawUdpPorts { get; init; } = "5055,5056,5058,27000-27002,9000,9001";
     public string? CaptureRoot { get; init; }
     public bool ShowHelp { get; init; }
     public bool ShowVersion { get; init; }
@@ -92,6 +94,15 @@ public sealed class CaptureOptions
                 case "--no-unity-metadata":
                     options.UnityMetadata = false;
                     break;
+                case "--raw-udp-capture":
+                    options.RawUdpCapture = true;
+                    break;
+                case "--no-raw-udp-capture":
+                    options.RawUdpCapture = false;
+                    break;
+                case "--raw-udp-ports":
+                    options.RawUdpPorts = RequireValue(args, ref index, arg);
+                    break;
                 default:
                     throw new ArgumentException($"Unknown argument '{arg}'.");
             }
@@ -131,6 +142,8 @@ public sealed class CaptureOptions
           --store-osc-values         Store OSC argument values instead of redacting them.
           --photon-metadata          Summarize proxy-observed Photon-like UDP metadata.
           --unity-metadata           Run optional Unity bundle metadata peeks.
+          --raw-udp-capture          Capture selected UDP packets with passive WinDivert.
+          --raw-udp-ports <ports>    Raw UDP port list/ranges. Default: 5055,5056,5058,27000-27002,9000,9001.
           --no-analysis-prompts      Do not ask optional analyzer questions.
           --capture-root <path>      Override captures directory parent.
           --version                  Print version.
@@ -161,6 +174,8 @@ public sealed class CaptureOptions
         public bool StoreOscValues { get; set; }
         public bool? PhotonMetadata { get; set; }
         public bool? UnityMetadata { get; set; }
+        public bool? RawUdpCapture { get; set; }
+        public string RawUdpPorts { get; set; } = "5055,5056,5058,27000-27002,9000,9001";
         public string? CaptureRoot { get; set; }
         public bool ShowHelp { get; set; }
         public bool ShowVersion { get; set; }
@@ -181,6 +196,8 @@ public sealed class CaptureOptions
                 StoreOscValues = StoreOscValues,
                 PhotonMetadata = PhotonMetadata,
                 UnityMetadata = UnityMetadata,
+                RawUdpCapture = RawUdpCapture,
+                RawUdpPorts = RawUdpPorts,
                 CaptureRoot = CaptureRoot,
                 ShowHelp = ShowHelp,
                 ShowVersion = ShowVersion,

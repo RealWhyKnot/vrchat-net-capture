@@ -23,6 +23,13 @@
     <None Include="..\..\capture_records.py" Link="capture_records.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\capture_utils.py" Link="capture_utils.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\capture_vrchat_logs.py" Link="capture_vrchat_logs.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\postprocess_raw_udp.py" Link="postprocess_raw_udp.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\requirements.txt" Link="requirements.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Native.WinDivert" Version="2.2.2" />
   </ItemGroup>
 </Project>

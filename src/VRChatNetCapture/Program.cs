@@ -6,6 +6,13 @@ public static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0].Equals("raw-udp-worker", StringComparison.OrdinalIgnoreCase))
+            {
+                return await RawUdpCaptureWorker.RunAsync(
+                    RawUdpCaptureOptions.Parse(args.Skip(1).ToArray()),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+
             var options = CaptureOptions.Parse(args);
             var paths = new CapturePaths(AppContext.BaseDirectory, options.CaptureRoot);
             using var cts = new CancellationTokenSource();

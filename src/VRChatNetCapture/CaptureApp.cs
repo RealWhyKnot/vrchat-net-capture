@@ -36,6 +36,9 @@ public sealed class CaptureApp
     {
         var session = _paths.CreateSession();
         Process? mitmdump = null;
+        Process? rawUdpWorker = null;
+        PythonCommand? pythonForPostprocess = null;
+        AnalysisOptions? analysis = null;
         var proxyChanged = false;
         Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
 
@@ -48,6 +51,7 @@ public sealed class CaptureApp
                 return 1;
             }
             Console.WriteLine($"[capture] using python: {python.FileName} {string.Join(" ", python.PrefixArgs)}");
+            pythonForPostprocess = python;
 
             if (!await PythonResolver.IsMitmproxyImportableAsync(python, _cancellationToken).ConfigureAwait(false))
             {
@@ -87,8 +91,12 @@ public sealed class CaptureApp
                 Console.Error.WriteLine("[capture] ERROR: local mode requires mitmproxy 10.2 or newer.");
                 return 1;
             }
-            var analysis = ResolveAnalysisOptions();
+            analysis = ResolveAnalysisOptions();
             PrintAnalysisState(analysis);
+            if (analysis.RawUdpCapture)
+            {
+                rawUdpWorker = StartRawUdpWorker(session, analysis);
+            }
 
             var cert = await CertificateManager.InitializeAsync(
                 mitmdumpPath,
@@ -127,6 +135,8 @@ public sealed class CaptureApp
                 StoreOscValues = analysis.StoreOscValues,
                 PhotonMetadata = analysis.PhotonMetadata,
                 UnityMetadata = analysis.UnityMetadata,
+                RawUdpCapture = analysis.RawUdpCapture,
+                RawUdpPorts = analysis.RawUdpPorts,
             };
             JsonFiles.Write(session.SessionFile, metadata);
             JsonFiles.Write(session.LatestPointer, metadata);
@@ -166,6 +176,14 @@ public sealed class CaptureApp
             {
                 Console.WriteLine($"[capture] stopping mitmdump (pid {mitmdump.Id})...");
                 TryKill(mitmdump);
+            }
+            if (rawUdpWorker is not null)
+            {
+                StopRawUdpWorker(rawUdpWorker, session, analysis);
+            }
+            if (analysis?.RawUdpCapture == true && pythonForPostprocess is not null)
+            {
+                RunRawUdpPostprocess(pythonForPostprocess, session.CaptureDir, analysis);
             }
             CleanupSession(session.CaptureDir, session.CaptureRoot, proxyChanged);
             Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
@@ -261,6 +279,9 @@ public sealed class CaptureApp
         var unityMetadata = ResolveOptIn(
             _options.UnityMetadata,
             "Run Unity bundle metadata peeks after detected bundle downloads? No asset export. [y/N] ");
+        var rawUdpCapture = ResolveOptIn(
+            _options.RawUdpCapture,
+            "Capture raw VRChat realtime UDP / likely Photon and OSC packets with passive WinDivert? Requires Administrator. [y/N] ");
 
         return new AnalysisOptions
         {
@@ -268,6 +289,8 @@ public sealed class CaptureApp
             StoreOscValues = storeOscValues,
             PhotonMetadata = photonMetadata,
             UnityMetadata = unityMetadata,
+            RawUdpCapture = rawUdpCapture,
+            RawUdpPorts = _options.RawUdpPorts,
         };
     }
 
@@ -348,6 +371,130 @@ public sealed class CaptureApp
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[capture] WARN: certificate cleanup failed: {ex.Message}");
+        }
+    }
+
+    private Process? StartRawUdpWorker(CaptureSession session, AnalysisOptions analysis)
+    {
+        var exe = Environment.ProcessPath ?? AppName();
+        var stopFile = Path.Combine(session.CaptureDir, ".raw-udp.stop");
+        if (File.Exists(stopFile))
+        {
+            File.Delete(stopFile);
+        }
+        var args = new[]
+        {
+            "raw-udp-worker",
+            "--capture-dir",
+            session.CaptureDir,
+            "--ports",
+            analysis.RawUdpPorts,
+            "--stop-file",
+            stopFile,
+        };
+        try
+        {
+            Console.WriteLine($"[capture] starting passive raw UDP capture for ports: {analysis.RawUdpPorts}");
+            var process = ProcessTools.StartBackground(exe, args, _paths.AppDir, elevate: true);
+            File.WriteAllText(Path.Combine(session.CaptureDir, ".raw-udp.pid"), process.Id.ToString());
+            Thread.Sleep(1500);
+            if (process.HasExited)
+            {
+                Console.Error.WriteLine("[capture] WARN: raw UDP capture worker exited early; continuing without passive packet capture.");
+                return null;
+            }
+            Console.WriteLine($"[capture] raw UDP worker pid={process.Id}");
+            return process;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[capture] WARN: raw UDP capture did not start: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void StopRawUdpWorker(Process process, CaptureSession session, AnalysisOptions? analysis)
+    {
+        if (process.HasExited)
+        {
+            return;
+        }
+        Console.WriteLine($"[capture] stopping raw UDP worker (pid {process.Id})...");
+        var stopFile = Path.Combine(session.CaptureDir, ".raw-udp.stop");
+        File.WriteAllText(stopFile, DateTimeOffset.UtcNow.ToString("O"));
+        WakeRawUdpWorker(analysis);
+        try
+        {
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[capture] WARN: raw UDP worker stop failed: {ex.Message}");
+        }
+    }
+
+    private static void WakeRawUdpWorker(AnalysisOptions? analysis)
+    {
+        var port = 9001;
+        try
+        {
+            var ports = RawUdpCaptureOptions.ParsePorts(analysis?.RawUdpPorts ?? "");
+            port = ports.Contains(9001) ? 9001 : ports[0];
+        }
+        catch
+        {
+        }
+        try
+        {
+            using var udp = new System.Net.Sockets.UdpClient();
+            udp.Send([0], 1, "127.0.0.1", port);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void RunRawUdpPostprocess(PythonCommand python, string captureDir, AnalysisOptions analysis)
+    {
+        var script = Path.Combine(AppContext.BaseDirectory, "postprocess_raw_udp.py");
+        if (!File.Exists(script))
+        {
+            return;
+        }
+        var args = new List<string>
+        {
+            script,
+            "--capture-dir",
+            captureDir,
+        };
+        if (analysis.DecodeOsc)
+        {
+            args.Add("--decode-osc");
+        }
+        if (analysis.StoreOscValues)
+        {
+            args.Add("--store-osc-values");
+        }
+        if (analysis.PhotonMetadata)
+        {
+            args.Add("--photon-metadata");
+        }
+        try
+        {
+            Console.WriteLine("[capture] running raw UDP postprocess...");
+            var result = PythonResolver.RunPythonAsync(python, args, CancellationToken.None).GetAwaiter().GetResult();
+            if (result != 0)
+            {
+                Console.Error.WriteLine("[capture] WARN: raw UDP postprocess failed.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[capture] WARN: raw UDP postprocess failed: {ex.Message}");
         }
     }
 
@@ -473,7 +620,8 @@ public sealed class CaptureApp
             $"osc={(analysis.DecodeOsc ? "on" : "off")}, " +
             $"osc_values={(analysis.StoreOscValues ? "on" : "off")}, " +
             $"photon_metadata={(analysis.PhotonMetadata ? "on" : "off")}, " +
-            $"unity_metadata={(analysis.UnityMetadata ? "on" : "off")}");
+            $"unity_metadata={(analysis.UnityMetadata ? "on" : "off")}, " +
+            $"raw_udp={(analysis.RawUdpCapture ? "on" : "off")}");
     }
 
     private static string GetVersion()

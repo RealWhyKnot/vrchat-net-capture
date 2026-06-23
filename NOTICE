@@ -17,6 +17,14 @@ the release archive, it is listed separately.
   VRChat Net Capture is published as a self-contained Windows binary that
   includes the .NET runtime and Microsoft libraries such as System.Text.Json.
 ============================================================
+Native.WinDivert / WinDivert (LGPL-3.0-or-later or GPL-2.0-or-later)
+  https://reqrypt.org/windivert.html
+  https://github.com/gdlol/Native.WinDivert
+  Ships WinDivert.dll and WinDivert64.sys for optional passive UDP packet
+  capture. VRChat Net Capture uses the LGPL-3.0-or-later licensing option.
+  The verbatim third-party license text ships as
+  THIRD-PARTY-WinDivert-LICENSE.txt.
+============================================================
 
 Runtime dependencies installed by the application or user:
 

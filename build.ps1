@@ -53,7 +53,16 @@ $PubArgs = @(
 dotnet publish "src/VRChatNetCapture/VRChatNetCapture.csproj" @PubArgs
 if ($LASTEXITCODE -ne 0) { throw "VRChatNetCapture publish failed" }
 
-foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "version.txt")) {
+$NativeBuildDir = Join-Path $PSScriptRoot "src\VRChatNetCapture\bin\Release\net10.0-windows\win-x64"
+foreach ($file in @("WinDivert.dll", "WinDivert64.sys")) {
+    $nativePath = Join-Path $NativeBuildDir $file
+    if (-not (Test-Path -LiteralPath $nativePath)) {
+        throw "Missing native packet capture dependency: $nativePath"
+    }
+    Copy-Item $nativePath (Join-Path $BuildDir $file) -Force
+}
+
+foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD-PARTY-WinDivert-LICENSE.txt", "version.txt")) {
     Copy-Item (Join-Path $PSScriptRoot $file) (Join-Path $BuildDir $file) -Force
 }
 

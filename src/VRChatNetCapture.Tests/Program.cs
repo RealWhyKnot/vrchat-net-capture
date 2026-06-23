@@ -5,6 +5,8 @@ var tests = new (string Name, Action Body)[]
     ("default options use local VRChat target", TestDefaultOptions),
     ("stop command parses", TestStopCommand),
     ("analysis options parse and default off", TestAnalysisOptions),
+    ("raw UDP worker options parse", TestRawUdpOptions),
+    ("UDP parser and PCAP writer handle IPv4 datagrams", TestUdpParserAndPcapWriter),
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
 };
@@ -39,6 +41,7 @@ static void TestDefaultOptions()
     Equal(null, options.DecodeOsc);
     Equal(null, options.PhotonMetadata);
     Equal(null, options.UnityMetadata);
+    Equal(null, options.RawUdpCapture);
 }
 
 static void TestStopCommand()
@@ -54,18 +57,68 @@ static void TestAnalysisOptions()
         "--store-osc-values",
         "--photon-metadata",
         "--unity-metadata",
+        "--raw-udp-capture",
+        "--raw-udp-ports",
+        "5055,9000-9001",
         "--no-analysis-prompts",
     ]);
     Equal(true, enabled.DecodeOsc);
     True(enabled.StoreOscValues);
     Equal(true, enabled.PhotonMetadata);
     Equal(true, enabled.UnityMetadata);
+    Equal(true, enabled.RawUdpCapture);
+    Equal("5055,9000-9001", enabled.RawUdpPorts);
     True(enabled.NoAnalysisPrompts);
 
-    var disabled = CaptureOptions.Parse(["--no-decode-osc", "--no-photon-metadata", "--no-unity-metadata"]);
+    var disabled = CaptureOptions.Parse(["--no-decode-osc", "--no-photon-metadata", "--no-unity-metadata", "--no-raw-udp-capture"]);
     Equal(false, disabled.DecodeOsc);
     Equal(false, disabled.PhotonMetadata);
     Equal(false, disabled.UnityMetadata);
+    Equal(false, disabled.RawUdpCapture);
+}
+
+static void TestRawUdpOptions()
+{
+    var options = RawUdpCaptureOptions.Parse(["--capture-dir", "C:\\capture", "--ports", "5055,9000-9001"]);
+    Equal("5055,9000-9001", options.Ports);
+    var ports = RawUdpCaptureOptions.ParsePorts(options.Ports);
+    Equal(3, ports.Count);
+    Contains(ports, 5055);
+    Contains(ports, 9000);
+    Contains(ports, 9001);
+
+    var filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
+    True(filter.Contains("udp.SrcPort == 5055", StringComparison.Ordinal));
+    True(filter.Contains("udp.DstPort == 9001", StringComparison.Ordinal));
+}
+
+static void TestUdpParserAndPcapWriter()
+{
+    var packet = BuildUdpPacket([1, 2, 3, 4]);
+    var info = UdpPacketParser.TryParse(packet);
+    True(info is not null);
+    Equal("127.0.0.1", info!.SourceAddress);
+    Equal("127.0.0.1", info.DestinationAddress);
+    Equal(50000, info.SourcePort);
+    Equal(9000, info.DestinationPort);
+    Equal(4, info.PayloadLength);
+
+    var path = Path.Combine(Path.GetTempPath(), $"vcnc-pcap-{Guid.NewGuid():N}.pcapng");
+    try
+    {
+        using (var writer = new PcapNgWriter(path))
+        {
+            writer.WritePacket(packet, DateTimeOffset.UnixEpoch);
+        }
+        True(new FileInfo(path).Length > 48);
+    }
+    finally
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
 }
 
 static void TestCertificateRemovalDecision()
@@ -141,10 +194,34 @@ static void Equal<T>(T expected, T actual)
     }
 }
 
-static void Contains(IReadOnlyList<string> values, string expected)
+static void Contains<T>(IReadOnlyList<T> values, T expected)
 {
     if (!values.Contains(expected))
     {
         throw new InvalidOperationException($"Expected argument '{expected}'.");
     }
+}
+
+static byte[] BuildUdpPacket(byte[] payload)
+{
+    var totalLength = 20 + 8 + payload.Length;
+    var packet = new byte[totalLength];
+    packet[0] = 0x45;
+    packet[2] = (byte)(totalLength >> 8);
+    packet[3] = (byte)totalLength;
+    packet[8] = 64;
+    packet[9] = 17;
+    packet[12] = 127;
+    packet[15] = 1;
+    packet[16] = 127;
+    packet[19] = 1;
+    packet[20] = 0xC3;
+    packet[21] = 0x50;
+    packet[22] = 0x23;
+    packet[23] = 0x28;
+    var udpLength = 8 + payload.Length;
+    packet[24] = (byte)(udpLength >> 8);
+    packet[25] = (byte)udpLength;
+    payload.CopyTo(packet.AsSpan(28));
+    return packet;
 }
