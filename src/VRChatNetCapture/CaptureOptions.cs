@@ -129,7 +129,7 @@ public sealed class CaptureOptions
           --no-update-prompt         Do not ask to update mitmproxy dependencies.
           --decode-osc               Decode observed OSC UDP datagrams.
           --store-osc-values         Store OSC argument values instead of redacting them.
-          --photon-metadata          Summarize Photon-like UDP stream metadata.
+          --photon-metadata          Summarize proxy-observed Photon-like UDP metadata.
           --unity-metadata           Run optional Unity bundle metadata peeks.
           --no-analysis-prompts      Do not ask optional analyzer questions.
           --capture-root <path>      Override captures directory parent.

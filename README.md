@@ -80,7 +80,7 @@ captures/<timestamp>/
 |-- summary.json                  # counts by host/status/event/error
 |-- osc-events.jsonl              # optional decoded OSC datagrams
 |-- osc-summary.json              # optional OSC counts by address/type tag
-|-- photon-packets.jsonl          # optional Photon-like UDP metadata
+|-- photon-packets.jsonl          # optional proxy-observed Photon-like UDP metadata
 |-- photon-summary.json           # optional Photon-like UDP counts
 |-- flows.mitm                    # native mitmproxy dump
 |-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
@@ -122,19 +122,21 @@ Common patterns:
 - WebSocket messages in `events.jsonl` plus payloads in `websockets/`.
 - TLS/connect failures where a target cannot be intercepted.
 - Optional OSC datagrams in `osc-events.jsonl` when OSC decoding is enabled.
-- Optional Photon-like UDP metadata in `photon-packets.jsonl` when Photon
-  metadata is enabled.
+- Optional proxy-observed Photon-like UDP metadata in `photon-packets.jsonl`
+  when Photon metadata is enabled.
 
 ## Limits
 
-- Photon payload semantics are not decoded. With `--photon-metadata`, captured
-  UDP datagrams are classified only as metadata candidates with ports, sizes,
-  direction, and low-confidence header shape guesses. Raw passive packet capture
-  is not implemented yet.
+- Photon payload semantics are not decoded. With `--photon-metadata`,
+  proxy-observed UDP datagrams are classified only as metadata candidates with
+  ports, sizes, direction, and low-confidence header shape guesses. A passive
+  raw packet backend is not implemented yet, so these records use
+  `capture_semantics: "proxy_observed"` rather than `wire_copy`.
 - OSC decoding is opt-in with `--decode-osc` or the startup prompt. It decodes
   datagrams already observed by the capture backend and redacts argument values
   unless `--store-osc-values` is used. It does not bind or compete for VRChat's
-  OSC ports.
+  OSC ports. Until a passive packet backend exists, OSC visibility depends on
+  what the current capture backend observes.
 - Certificate pinning can prevent HTTPS interception. Look for
   `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
   and unmatched VRChat log URLs.

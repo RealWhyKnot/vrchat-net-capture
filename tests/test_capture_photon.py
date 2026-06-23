@@ -21,6 +21,7 @@ class CapturePhotonTests(unittest.TestCase):
         assert photon is not None
         self.assertEqual(photon["confidence"], "medium")
         self.assertEqual(photon["ports"], [5055])
+        self.assertEqual(photon["capture_semantics"], "proxy_observed")
         self.assertEqual(photon["payload_semantics"], "not decoded")
         self.assertEqual(photon["header_guess"]["command_count"], 1)
 
@@ -34,6 +35,7 @@ class CapturePhotonTests(unittest.TestCase):
 
         self.assertEqual(summary["candidate_packet_count"], 1)
         self.assertEqual(summary["ports"]["5058"], 1)
+        self.assertEqual(summary["capture_semantics"], "proxy_observed")
         self.assertEqual(summary["payload_semantics"], "not decoded")
 
 

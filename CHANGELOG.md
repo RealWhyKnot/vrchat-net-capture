@@ -10,7 +10,8 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 - Startup now asks before updating mitmproxy dependencies.
 - Startup now asks before enabling OSC decoding, Photon-like UDP metadata, and Unity bundle metadata; all default to no.
 - Added OSC datagram decoding for observed UDP stream payloads, with OSC argument values redacted unless explicitly enabled.
-- Added Photon-like UDP metadata summaries for observed stream payloads; payload semantics are not decoded.
+- Added proxy-observed Photon-like UDP metadata summaries for observed stream payloads; payload semantics are not decoded.
+- Stream-derived UDP/TCP analysis records now label `capture_semantics` so proxy-observed data is not confused with passive wire-copy packet capture.
 - Session-installed mitmproxy CA certificates are removed on stop by exact thumbprint unless `-KeepCert` is used.
 - Captures now include `events.jsonl`, `events.json`, `summary.json`, `flows.mitm`, WebSocket payloads, stream payloads, and VRChat output-log URL correlation.
 - Consolidated user documentation into README and removed standalone design/recon docs.

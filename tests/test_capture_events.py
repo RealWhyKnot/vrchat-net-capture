@@ -53,6 +53,7 @@ class CaptureEventsTests(unittest.TestCase):
 
         self.assertEqual(payload, b"\x00\x01\x02")
         self.assertEqual(event["preview"]["encoding"], "base64")
+        self.assertEqual(event["capture_semantics"], "proxy_observed")
 
     def test_build_summary_counts_flows_and_events(self) -> None:
         summary = build_summary(

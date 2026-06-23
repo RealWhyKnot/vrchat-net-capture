@@ -26,6 +26,7 @@ def classify_photon_packet(event: dict[str, Any], payload: bytes) -> dict[str, A
         "reasons": reasons,
         "ports": ports,
         "size": len(payload),
+        "capture_semantics": "proxy_observed",
         "header_guess": header,
         "payload_semantics": "not decoded",
         "note": "metadata only; payload semantics are not decoded",
@@ -50,6 +51,7 @@ def build_photon_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "directions": dict(sorted(directions.items())),
         "ports": dict(sorted(ports.items())),
         "confidences": dict(sorted(confidences.items())),
+        "capture_semantics": "proxy_observed",
         "decoder": "metadata-only",
         "payload_semantics": "not decoded",
     }

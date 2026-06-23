@@ -346,6 +346,7 @@ class CaptureAddon:
             "ts": event.get("ts"),
             "flow_id": event.get("flow_id"),
             "direction": event.get("direction"),
+            "capture_semantics": event.get("capture_semantics"),
             "client": event.get("client"),
             "server": event.get("server"),
             "payload_hash": event.get("payload_hash"),

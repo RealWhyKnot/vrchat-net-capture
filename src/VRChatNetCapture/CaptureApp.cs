@@ -257,7 +257,7 @@ public sealed class CaptureApp
 
         var photonMetadata = ResolveOptIn(
             _options.PhotonMetadata,
-            "Build Photon-like UDP metadata from captured stream data? Payload semantics are not decoded. [y/N] ");
+            "Build proxy-observed Photon-like UDP metadata? Payload semantics are not decoded. [y/N] ");
         var unityMetadata = ResolveOptIn(
             _options.UnityMetadata,
             "Run Unity bundle metadata peeks after detected bundle downloads? No asset export. [y/N] ");

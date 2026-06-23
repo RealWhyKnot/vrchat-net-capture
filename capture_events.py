@@ -90,6 +90,7 @@ def stream_event(kind: str, flow: Any) -> tuple[dict[str, Any], bytes]:
     event = build_event(
         kind,
         flow,
+        capture_semantics="proxy_observed",
         direction="client_to_server" if getattr(msg, "from_client", False) else "server_to_client" if msg else None,
         size=len(content),
         timestamp=getattr(msg, "timestamp", None) if msg else None,
