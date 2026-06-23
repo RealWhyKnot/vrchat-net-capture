@@ -1,0 +1,408 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
+
+namespace VRChatNetCapture;
+
+public sealed class CaptureApp
+{
+    private readonly CaptureOptions _options;
+    private readonly CapturePaths _paths;
+    private readonly CancellationToken _cancellationToken;
+
+    public CaptureApp(CaptureOptions options, CapturePaths paths, CancellationToken cancellationToken)
+    {
+        _options = options;
+        _paths = paths;
+        _cancellationToken = cancellationToken;
+    }
+
+    public async Task<int> RunAsync()
+    {
+        if (_options.ShowHelp)
+        {
+            Console.WriteLine(CaptureOptions.Usage(AppName()));
+            return 0;
+        }
+        if (_options.ShowVersion)
+        {
+            Console.WriteLine(GetVersion());
+            return 0;
+        }
+        return _options.Command == "stop" ? Stop() : await StartAsync().ConfigureAwait(false);
+    }
+
+    public async Task<int> StartAsync()
+    {
+        var session = _paths.CreateSession();
+        Process? mitmdump = null;
+        var proxyChanged = false;
+        Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
+
+        try
+        {
+            var python = await PythonResolver.FindPythonAsync(_cancellationToken).ConfigureAwait(false);
+            if (python is null)
+            {
+                Console.Error.WriteLine("[capture] ERROR: No real Python 3 found on PATH.");
+                return 1;
+            }
+            Console.WriteLine($"[capture] using python: {python.FileName} {string.Join(" ", python.PrefixArgs)}");
+
+            if (!await PythonResolver.IsMitmproxyImportableAsync(python, _cancellationToken).ConfigureAwait(false))
+            {
+                Console.WriteLine("[capture] mitmproxy not installed in this Python -- installing...");
+                var install = await PythonResolver.RunPythonAsync(
+                    python,
+                    ["-m", "pip", "install", "--user", "-r", _paths.RequirementsPath],
+                    _cancellationToken).ConfigureAwait(false);
+                if (install != 0)
+                {
+                    Console.Error.WriteLine("[capture] ERROR: pip install failed.");
+                    return 1;
+                }
+            }
+
+            var update = await PromptAndUpdateMitmproxyAsync(python).ConfigureAwait(false);
+            if (update != 0)
+            {
+                Console.Error.WriteLine("[capture] ERROR: mitmproxy update failed. Re-run with --no-update-prompt to skip it.");
+                return 1;
+            }
+
+            var mitmdumpPath = await PythonResolver.ResolveMitmdumpAsync(python, _cancellationToken).ConfigureAwait(false);
+            if (mitmdumpPath is null)
+            {
+                Console.Error.WriteLine("[capture] ERROR: Cannot locate mitmdump.");
+                return 1;
+            }
+            var version = await PythonResolver.GetMitmproxyVersionAsync(mitmdumpPath, _cancellationToken).ConfigureAwait(false);
+            Console.WriteLine($"[capture] using mitmdump: {mitmdumpPath}");
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                Console.WriteLine($"[capture] mitmproxy version: {version}");
+            }
+            if (_options.Mode == "local" && !PythonResolver.SupportsLocalMode(version))
+            {
+                Console.Error.WriteLine("[capture] ERROR: local mode requires mitmproxy 10.2 or newer.");
+                return 1;
+            }
+
+            var cert = await CertificateManager.InitializeAsync(
+                mitmdumpPath,
+                session.CertificateFile,
+                _options.NoCertInstall,
+                _options.KeepCert,
+                _cancellationToken).ConfigureAwait(false);
+            PrintCertificateState(cert);
+
+            if (_options.Mode == "regular")
+            {
+                Console.WriteLine("[capture] stashing current proxy settings...");
+                ProxyManager.Save(session.PreviousProxyFile);
+                Console.WriteLine($"[capture] setting system proxy to 127.0.0.1:{_options.ListenPort}");
+                ProxyManager.SetLocalProxy(_options.ListenPort);
+                proxyChanged = true;
+            }
+            else
+            {
+                Console.WriteLine($"[capture] using local capture mode for target: {_options.LocalTarget}");
+            }
+
+            var metadata = new SessionMetadata
+            {
+                SessionDir = session.CaptureDir,
+                PidFile = session.PidFile,
+                SessionFile = session.SessionFile,
+                CertFile = session.CertificateFile,
+                ProxyChanged = proxyChanged,
+                Mode = _options.Mode,
+                LocalTarget = _options.Mode == "local" ? _options.LocalTarget : null,
+                ListenPort = _options.Mode == "regular" ? _options.ListenPort : null,
+                StartedAt = DateTimeOffset.Now.ToString("O"),
+                Mitmproxy = version,
+            };
+            JsonFiles.Write(session.SessionFile, metadata);
+            JsonFiles.Write(session.LatestPointer, metadata);
+
+            var args = BuildMitmdumpArguments(_options, _paths, session);
+            Console.WriteLine("[capture] launching mitmdump...");
+            mitmdump = ProcessTools.StartInteractive(mitmdumpPath, args, _paths.AppDir);
+            File.WriteAllText(session.PidFile, mitmdump.Id.ToString());
+
+            if (_options.Mode == "regular")
+            {
+                if (!await WaitForTcpPortAsync(_options.ListenPort, mitmdump, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
+                {
+                    Console.Error.WriteLine($"[capture] ERROR: mitmdump did not bind 127.0.0.1:{_options.ListenPort} within 10s.");
+                    TryKill(mitmdump);
+                    return 1;
+                }
+            }
+            else
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), _cancellationToken).ConfigureAwait(false);
+                if (mitmdump.HasExited)
+                {
+                    Console.Error.WriteLine($"[capture] ERROR: mitmdump exited early with code {mitmdump.ExitCode}. Local mode may require an elevated shell.");
+                    return 1;
+                }
+            }
+
+            PrintReady(session.CaptureDir);
+            await mitmdump.WaitForExitAsync(_cancellationToken).ConfigureAwait(false);
+            Console.WriteLine($"[capture] mitmdump exited (code {mitmdump.ExitCode}).");
+            return mitmdump.ExitCode;
+        }
+        finally
+        {
+            if (mitmdump is not null && !mitmdump.HasExited)
+            {
+                Console.WriteLine($"[capture] stopping mitmdump (pid {mitmdump.Id})...");
+                TryKill(mitmdump);
+            }
+            CleanupSession(session.CaptureDir, session.CaptureRoot, proxyChanged);
+            Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
+            Console.WriteLine("[capture] done.");
+        }
+    }
+
+    public int Stop()
+    {
+        if (!Directory.Exists(_paths.CaptureRoot))
+        {
+            Console.WriteLine("[capture] no captures dir -- nothing to clean up.");
+            return 0;
+        }
+        var sessionDir = FindLatestSession(_paths.CaptureRoot, _paths.LatestPointer);
+        if (sessionDir is null)
+        {
+            Console.WriteLine("[capture] no capture session found -- nothing to clean up.");
+        }
+        else
+        {
+            Console.WriteLine($"[capture] cleaning up {sessionDir}");
+            StopMitmdumpForSession(sessionDir);
+            var metadata = JsonFiles.Read<SessionMetadata>(Path.Combine(sessionDir, ".session.json"));
+            CleanupSession(sessionDir, _paths.CaptureRoot, metadata?.ProxyChanged ?? File.Exists(Path.Combine(sessionDir, ".previous-proxy.json")));
+        }
+        StopStrayMitmdumpProcesses();
+        Console.WriteLine("[capture] done.");
+        return 0;
+    }
+
+    public static IReadOnlyList<string> BuildMitmdumpArguments(CaptureOptions options, CapturePaths paths, CaptureSession session)
+    {
+        var args = new List<string>();
+        if (options.Mode == "local")
+        {
+            args.AddRange(["--mode", string.IsNullOrWhiteSpace(options.LocalTarget) ? "local" : $"local:{options.LocalTarget}"]);
+        }
+        else
+        {
+            args.AddRange(["--mode", "regular", "--listen-host", "127.0.0.1", "--listen-port", options.ListenPort.ToString()]);
+        }
+        args.AddRange(
+        [
+            "-s",
+            paths.AddonPath,
+            "--set",
+            $"capture_dir={session.CaptureDir}",
+            "--set",
+            $"ignore_hosts_list={options.IgnoreHosts}",
+            "--set",
+            "flow_detail=0",
+            "-w",
+            Path.Combine(session.CaptureDir, "flows.mitm"),
+        ]);
+        return args;
+    }
+
+    private async Task<int> PromptAndUpdateMitmproxyAsync(PythonCommand python)
+    {
+        if (_options.NoUpdatePrompt)
+        {
+            return 0;
+        }
+        if (!File.Exists(_paths.RequirementsPath))
+        {
+            return 0;
+        }
+        if (Console.IsInputRedirected)
+        {
+            return 0;
+        }
+        Console.Write("[capture] Check for and install the latest mitmproxy now? [Y/n] ");
+        var answer = Console.ReadLine();
+        if (!string.IsNullOrWhiteSpace(answer) && !answer.StartsWith("y", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+        return await PythonResolver.RunPythonAsync(
+            python,
+            ["-m", "pip", "install", "--upgrade", "-r", _paths.RequirementsPath],
+            _cancellationToken).ConfigureAwait(false);
+    }
+
+    private void CleanupSession(string sessionDir, string captureRoot, bool proxyChanged)
+    {
+        if (proxyChanged)
+        {
+            var previousProxy = Path.Combine(sessionDir, ".previous-proxy.json");
+            var settings = JsonFiles.Read<ProxySettings>(previousProxy);
+            if (settings is not null)
+            {
+                try
+                {
+                    Console.WriteLine("[capture] restoring previous proxy settings...");
+                    ProxyManager.Restore(settings);
+                    Console.WriteLine("[capture] proxy restored.");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[capture] WARN: proxy restore failed: {ex.Message}");
+                }
+            }
+        }
+
+        try
+        {
+            var result = CertificateManager.RemoveForSession(sessionDir, captureRoot);
+            if (result.Removed)
+            {
+                Console.WriteLine($"[capture] removed session CA: {result.Thumbprint}");
+            }
+            else if (result.Reason == "other-active-session")
+            {
+                Console.WriteLine($"[capture] WARN: kept CA because another capture is active: {result.Thumbprint}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[capture] WARN: certificate cleanup failed: {ex.Message}");
+        }
+    }
+
+    private static async Task<bool> WaitForTcpPortAsync(int port, Process process, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline && !process.HasExited)
+        {
+            try
+            {
+                using var client = new System.Net.Sockets.TcpClient();
+                await client.ConnectAsync("127.0.0.1", port).ConfigureAwait(false);
+                return true;
+            }
+            catch
+            {
+                await Task.Delay(250).ConfigureAwait(false);
+            }
+        }
+        return false;
+    }
+
+    private static string? FindLatestSession(string captureRoot, string latestPointer)
+    {
+        var latest = JsonFiles.Read<SessionMetadata>(latestPointer);
+        if (latest is not null && Directory.Exists(latest.SessionDir))
+        {
+            return latest.SessionDir;
+        }
+        return Directory.EnumerateDirectories(captureRoot)
+            .Where(static d => File.Exists(Path.Combine(d, ".session.json")) || File.Exists(Path.Combine(d, ".previous-proxy.json")))
+            .OrderByDescending(Directory.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+    }
+
+    private static void StopMitmdumpForSession(string sessionDir)
+    {
+        var pidFile = Path.Combine(sessionDir, ".mitmdump.pid");
+        if (!File.Exists(pidFile))
+        {
+            return;
+        }
+        if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid))
+        {
+            return;
+        }
+        try
+        {
+            var process = Process.GetProcessById(pid);
+            Console.WriteLine($"[capture] killing mitmdump pid={pid}");
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void StopStrayMitmdumpProcesses()
+    {
+        foreach (var process in Process.GetProcessesByName("mitmdump"))
+        {
+            try
+            {
+                Console.WriteLine($"[capture] killing stray mitmdump pid={process.Id}");
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void PrintCertificateState(CertificateMetadata cert)
+    {
+        if (!string.IsNullOrWhiteSpace(cert.Error))
+        {
+            Console.Error.WriteLine($"[capture] WARN: {cert.Error}");
+        }
+        else if (cert.InstalledBySession)
+        {
+            Console.WriteLine($"[capture] CA installed for current user: {cert.Thumbprint}");
+        }
+        else if (cert.ExistedBefore)
+        {
+            Console.WriteLine($"[capture] CA already trusted for current user: {cert.Thumbprint}");
+        }
+    }
+
+    private static void PrintReady(string captureDir)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=================================================================");
+        Console.WriteLine(" READY. Launch VRChat now and visit the worlds you want to study.");
+        Console.WriteLine($" Capture dir: {captureDir}");
+        Console.WriteLine(" Press Ctrl+C in this window to stop and tear everything down.");
+        Console.WriteLine("=================================================================");
+        Console.WriteLine();
+    }
+
+    private static string AppName() => Path.GetFileName(Environment.ProcessPath) ?? "VRChatNetCapture";
+
+    private static string GetVersion()
+    {
+        var versionPath = Path.Combine(AppContext.BaseDirectory, "version.txt");
+        if (File.Exists(versionPath))
+        {
+            return File.ReadAllText(versionPath).Trim();
+        }
+        return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+    }
+}

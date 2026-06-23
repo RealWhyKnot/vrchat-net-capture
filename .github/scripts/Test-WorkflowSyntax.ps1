@@ -28,9 +28,13 @@ function Add-ParseErrors {
     }
 }
 
-$trackedScripts = & git -C $Root ls-files '*.ps1' '*.psm1' '*.psd1'
+$trackedScripts = @(
+    & git -C $Root ls-files '*.ps1' '*.psm1' '*.psd1'
+    & git -C $Root ls-files --others --exclude-standard '*.ps1' '*.psm1' '*.psd1'
+) | Where-Object { $_ }
 foreach ($relative in $trackedScripts) {
     $path = Join-Path $Root $relative
+    if (-not (Test-Path -LiteralPath $path)) { continue }
     $parseErrors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$parseErrors)
     Add-ParseErrors -Source $relative -ParseErrors $parseErrors
@@ -59,8 +63,8 @@ if (Test-Path -LiteralPath $workflowDir) {
             }
             if ($baseline -lt 0) { return }
             $body = ($blockLines | ForEach-Object {
-                if ($_.Length -gt $baseline) { $_.Substring($baseline) } else { '' }
-            }) -join "`n"
+                    if ($_.Length -gt $baseline) { $_.Substring($baseline) } else { '' }
+                }) -join "`n"
             $stubbed = $ghaPattern.Replace($body, '__GHA_EXPR__')
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseInput($stubbed, [ref]$null, [ref]$parseErrors)
@@ -77,7 +81,8 @@ if (Test-Path -LiteralPath $workflowDir) {
                     & $flush
                     $blockLines.Clear()
                     $inRun = $false
-                } else {
+                }
+                else {
                     $blockLines.Add($line) | Out-Null
                     continue
                 }

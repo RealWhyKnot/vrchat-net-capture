@@ -1,146 +1,149 @@
-# vrchat-net-capture
+# VRChat Net Capture
 
-A one-shot HTTPS-decrypting proxy for Windows that captures every HTTP/HTTPS
-request VRChat makes during a play session, decodes responses, and sorts
-them per-host. Built on top of [mitmproxy](https://mitmproxy.org/).
+VRChat Net Capture is a Windows capture tool for inspecting the HTTP(S),
+WebSocket, TLS/connect, DNS, TCP, UDP, and VRChat output-log evidence from a
+local VRChat session. The released app is `VRChatNetCapture.exe`; mitmproxy
+does the network interception and the bundled Python addon writes the capture
+artifacts.
 
-> **Security note:** this tool installs the mitmproxy CA into your
-> CurrentUser trust store and points Windows' system proxy at a local
-> mitmdump. While it is running, the local proxy can MITM every HTTPS
-> connection your user account makes. That is necessary for the tool to
-> work, but worth being aware of. Removal instructions are below.
+The tool does not upload captures anywhere. Everything is written locally under
+`captures\<timestamp>\`.
 
-This tool does not transmit captures anywhere, does not attempt DRM
-circumvention, and writes everything to a local `captures/<timestamp>/`
-directory.
+## Security
 
-## What it does, in one sentence
+VRChat Net Capture installs the mitmproxy CA into `Cert:\CurrentUser\Root` while
+a capture is running. The default local capture mode targets `VRChat.exe`
+without changing the Windows system proxy. If you use `--mode regular`, the app
+also points Windows' system proxy at a local mitmdump instance.
 
-Brings up a local proxy that records every HTTP(S) request VRChat makes,
-decoded into a human-browseable directory tree, then cleans up after
-itself when you Ctrl+C.
+On stop, the app removes only the exact CA thumbprint that the current session
+installed. If that CA already existed before the session, it is left alone. Use
+`--keep-cert` if you want to keep a session-installed CA between runs.
 
-## Files in this repo
+## Requirements
 
-| File | Role |
-| --- | --- |
-| `start-capture.ps1` | Orchestrator — installs cert, sets system proxy, launches mitmdump, restores everything on exit. |
-| `stop-capture.ps1`  | Belt-and-suspenders cleanup if `start-capture.ps1` was killed without its `finally {}` running. |
-| `capture_addon.py`  | mitmproxy addon — per-flow logging, decoding, hashing, per-host sorting. |
-| `requirements.txt`  | `pip install -r requirements.txt` deps. |
-| `RECON.md`          | Methodology guide — how to scope a session and interpret the output. |
-| `DESIGN.md`         | Why the tool is shaped the way it is. |
-| `captures/`         | Per-session output (gitignored). |
-
-## Prerequisites
-
-1. **Windows 10/11.** PowerShell 5.1 or 7+ both work.
-2. **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/windows/).
-   The Microsoft Store stub at
-   `%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe` is **not** real
-   Python — uninstall it from `Settings → Apps → App execution aliases`
-   or install real Python and let it take PATH priority.
-   - The script auto-detects and skips the Store stub but still needs a
-     real interpreter somewhere.
-3. **mitmproxy** — installed automatically into Python's user site by
-   `start-capture.ps1` if missing. To install yourself:
-   ```
-   python -m pip install --user mitmproxy
-   ```
-4. **VRChat closed** when you start the proxy. Launch it *after* you see
-   the `READY` banner.
+- Windows 10/11.
+- Python 3.11 or newer from python.org. The Microsoft Store `python.exe` stub is
+  skipped.
+- mitmproxy 10.2 or newer. If it is missing, the app installs it with pip. On
+  startup, the app asks whether to update mitmproxy dependencies.
 
 ## Usage
 
-From a PowerShell prompt in this directory:
+From the release folder:
 
 ```powershell
-.\start-capture.ps1
+.\VRChatNetCapture.exe
 ```
 
-Sequence:
+Default behavior:
 
-1. Python + mitmproxy resolution.
-2. CA install on first run (uses CurrentUser store — no admin needed).
-3. Proxy stash + set.
-4. mitmdump launch.
-5. Big green `READY` banner. Launch VRChat and visit the world(s) you
-   want to study.
-6. When you're done, Ctrl+C. The script will:
-   - kill mitmdump,
-   - restore your previous proxy settings,
-   - leave the capture intact at `captures\<timestamp>\`.
+1. Finds Python.
+2. Installs mitmproxy if missing.
+3. Asks whether to update mitmproxy.
+4. Installs the mitmproxy CA for the current user.
+5. Starts `mitmdump --mode local:VRChat.exe`.
+6. Prints `READY`. Launch VRChat after that.
+7. On Ctrl+C, stops mitmdump and removes the session CA.
 
-If the PowerShell window was closed with the X button (so the cleanup
-`finally {}` never ran) and your network is now broken because the system
-proxy still points at a dead local port, run:
+Useful options:
 
 ```powershell
-.\stop-capture.ps1
+.\VRChatNetCapture.exe --mode regular
+.\VRChatNetCapture.exe --mode local --local-target VRChat.exe
+.\VRChatNetCapture.exe --listen-port 8081
+.\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
+.\VRChatNetCapture.exe --keep-cert
+.\VRChatNetCapture.exe --no-update-prompt
+.\VRChatNetCapture.exe stop
 ```
+
+Use `stop` if a capture window was closed before cleanup ran.
 
 ## Output
 
 ```
 captures/<timestamp>/
-├── flows.jsonl            # one JSON object per request, append-only
-├── flows.json             # same data as an array, written at shutdown
-├── bodies/<sha256>.bin    # raw decompressed response bodies
-├── decoded/<sha256>.json  # pretty-printed where applicable
-│       <sha256>.txt
-│       <sha256>.m3u8
-│       <sha256>.hex       # 256-byte hex preview for binaries
-└── by-host/<host>/<ts>__<METHOD>__<status>__<slug>__<flowid>.json
+|-- .session.json
+|-- .mitmproxy-cert.json
+|-- .previous-proxy.json          # regular mode only
+|-- flows.jsonl                   # one HTTP flow per line
+|-- flows.json                    # HTTP flow array written at shutdown
+|-- events.jsonl                  # CONNECT/TLS/WebSocket/DNS/TCP/UDP events
+|-- events.json                   # event array written at shutdown
+|-- summary.json                  # counts by host/status/event/error
+|-- flows.mitm                    # native mitmproxy dump
+|-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
+|-- vrchat-log-unmatched.jsonl    # log URLs not matched by captured HTTP flows
+|-- bodies/<sha256>.bin
+|-- websockets/<sha256>.ws.bin
+|-- streams/<sha256>.<tcp|udp>.bin
+|-- decoded/<sha256>.json|txt|m3u8|hex
+`-- by-host/<host>/<time>__<METHOD>__<status>__<slug>__<flowid>.json
 ```
 
-`by-host/<host>/` is the per-server view. VRChat's own infrastructure
-(`api.vrchat.cloud`, `assets.vrchat.com`, etc.) will dominate the
-listing; the world-specific backends are usually one or two hosts that
-don't look VRChat-affiliated. See [RECON.md](RECON.md) for a worked
-methodology.
+Start with `summary.json`, then inspect `by-host/`. VRChat infrastructure hosts
+such as `api.vrchat.cloud`, `assets.vrchat.com`, `files.vrchat.cloud`, and
+`pipeline.vrchat.cloud` are common. World-specific backends are usually hosts
+that do not look VRChat-affiliated.
 
-## Removing the CA when you're done
+`vrchat-log-unmatched.jsonl` is the missed-traffic checklist: it contains URLs
+seen in VRChat's own output log that did not exactly match a captured HTTP flow.
 
-The script intentionally does not remove the CA on shutdown — installing
-it triggers a once-per-run prompt that gets noisy. To remove it:
+## Capture Method
+
+For a useful world recon run:
+
+1. Start VRChat Net Capture first.
+2. Launch VRChat after the `READY` banner.
+3. Enter the world fresh, preferably a new instance.
+4. Wait for the main UI/catalog to populate.
+5. Trigger search, paging, play buttons, images, and any controls that should
+   touch the network.
+6. Let playback run briefly.
+7. Quit or leave the world cleanly.
+8. Stop the capture.
+
+Common patterns:
+
+- One large JSON catalog plus many image fetches.
+- HLS playlists pointing to media segment hosts.
+- Per-search or per-page API requests.
+- WebSocket messages in `events.jsonl` plus payloads in `websockets/`.
+- TLS/connect failures where a target cannot be intercepted.
+
+## Limits
+
+- Photon multiplayer traffic is not decoded.
+- OSC loopback traffic is not decoded.
+- Certificate pinning can prevent HTTPS interception. Look for TLS/connect
+  errors and unmatched VRChat log URLs.
+- Unity asset bundles are detected by magic bytes and archived; deep bundle
+  extraction is out of scope.
+
+## Development
 
 ```powershell
-Get-ChildItem Cert:\CurrentUser\Root |
-    Where-Object Subject -match 'mitmproxy' |
-    Remove-Item
+.\scripts\format.ps1
+.\scripts\lint.ps1
+.\build.ps1
+.\build.ps1 -Package
 ```
 
-Or via `certutil`:
+`build.ps1` writes a local daily version to `version.txt`, publishes a win-x64
+distribution into `dist/`, and can create `VRChatNetCapture-v<version>.zip`
+plus a manifest.
 
+Releases are tag-driven:
+
+```powershell
+git tag vYYYY.M.D.N
+git push origin vYYYY.M.D.N
 ```
-certutil -delstore -user Root mitmproxy
-```
 
-## Caveats
-
-- **Some apps ignore the system proxy.** VRChat's standard HTTP requests
-  (`[String Download]`, `[Image Download]`, asset bundle downloads, the
-  VRChat REST API) all go through .NET's HttpClient, which honours the
-  WinINET proxy — those *will* be captured. If something is missing
-  (e.g. a bare-socket protocol), the proxy can't see it; that's where
-  you'd reach for Wireshark or a system-wide hook.
-- **Photon (the multiplayer transport) is UDP**, not HTTP. It will not
-  appear in this capture. That's expected.
-- **TLS pinning** would defeat the proxy. Symptom: a flow record with
-  `errored: true` and `response_body_hash: null` for the affected host.
-
-## Troubleshooting
-
-- *"mitmdump did not bind 127.0.0.1:8080 within 10s"* — port already in
-  use. Re-run with `-ListenPort 8081`.
-- *"CurrentUser cert install failed"* — install manually and re-run
-  with `-NoCertInstall`:
-  ```
-  certutil -addstore -user Root "$env:USERPROFILE\.mitmproxy\mitmproxy-ca-cert.cer"
-  ```
-- *"After running, my browser shows TLS errors"* — the proxy is still
-  set. Run `.\stop-capture.ps1`.
-- *VRChat refuses to launch / can't auth* — same as above; restore proxy.
+Release tags may also use `-beta`. Commit subjects are stamped from
+`version.txt` by the repo hook and the commit-message check rejects duplicate
+version stamps.
 
 ## License
 

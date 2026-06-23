@@ -8,6 +8,9 @@ exclude = [
     ".ruff_cache",
     ".venv",
     "captures",
+    "dist",
+    "bin",
+    "obj",
 ]
 
 [tool.ruff.lint]

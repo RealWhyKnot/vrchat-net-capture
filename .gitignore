@@ -1,9 +1,14 @@
 captures/
+dist/
+bin/
+obj/
+test-results/
 __pycache__/
 *.pyc
 *.pyo
 .ruff_cache/
 version.txt
+.local_build_state.json
 .venv/
 venv/
 *.log

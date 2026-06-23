@@ -17,12 +17,17 @@ function Invoke-Native {
 
 Invoke-Native 'ruff format' { python -m ruff format . }
 Invoke-Native 'ruff fix' { python -m ruff check --fix . }
+Invoke-Native 'dotnet format' { dotnet format src/VRChatNetCapture/VRChatNetCapture.csproj }
 
 if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
     Import-Module PSScriptAnalyzer
-    $psFiles = & git ls-files '*.ps1' '*.psm1' '*.psd1'
+    $psFiles = @(
+        & git ls-files '*.ps1' '*.psm1' '*.psd1'
+        & git ls-files --others --exclude-standard '*.ps1' '*.psm1' '*.psd1'
+    ) | Where-Object { $_ }
     foreach ($file in $psFiles) {
         $path = Join-Path $RepoRoot $file
+        if (-not (Test-Path -LiteralPath $path)) { continue }
         $text = [System.IO.File]::ReadAllText($path) -replace "`r`n?", "`n"
         $formatted = Invoke-Formatter -ScriptDefinition $text
         if ($formatted -ne $text) {
@@ -30,6 +35,7 @@ if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
             Write-Host "Formatted $file"
         }
     }
-} else {
+}
+else {
     Write-Warning 'PSScriptAnalyzer is not installed; skipped PowerShell formatting.'
 }

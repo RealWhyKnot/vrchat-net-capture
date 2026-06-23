@@ -28,12 +28,17 @@ permissions:
 
 jobs:
   lint-test:
-    name: lint + unittest
+    name: dotnet + python checks
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -51,6 +56,12 @@ jobs:
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Repository PSGallery
 
+      - name: Restore
+        run: dotnet restore src/VRChatNetCapture/VRChatNetCapture.csproj
+
       - name: Lint and test
         shell: pwsh
         run: ./scripts/lint.ps1
+
+      - name: Build
+        run: dotnet build src/VRChatNetCapture/VRChatNetCapture.csproj --configuration Release --no-restore -warnaserror
