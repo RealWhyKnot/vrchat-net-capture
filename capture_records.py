@@ -8,6 +8,18 @@ from typing import Any
 
 from capture_utils import decode_response, relative_artifact_path, unitypy_peek
 
+SENSITIVE_HEADERS = {
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "set-cookie",
+    "x-api-key",
+    "x-csrf-token",
+    "x-vrc-api-key",
+    "x-xsrf-token",
+}
+REDACTED = "<redacted>"
+
 
 def save_body(bodies_dir: Path, data: bytes, suffix: str = ".bin") -> str:
     h = hashlib.sha256(data).hexdigest()
@@ -93,8 +105,8 @@ def build_http_record(
         "host": host,
         "path": req.path,
         "status": resp.status_code if resp else None,
-        "request_headers": dict(req.headers.items()),
-        "response_headers": dict(resp.headers.items()) if resp else None,
+        "request_headers": redact_headers(req.headers.items()),
+        "response_headers": redact_headers(resp.headers.items()) if resp else None,
         "request_body_hash": req_hash,
         "request_body_path": f"bodies/{req_hash}.req.bin" if req_hash else None,
         "request_body_size": len(req_decoded) if req_decoded else 0,
@@ -111,6 +123,16 @@ def build_http_record(
         "client_ip": peer_host(flow.client_conn),
         "server_ip": peer_host(flow.server_conn),
     }
+
+
+def redact_headers(headers: Any) -> dict[str, str]:
+    redacted: dict[str, str] = {}
+    for key, value in headers:
+        if str(key).lower() in SENSITIVE_HEADERS:
+            redacted[str(key)] = REDACTED
+        else:
+            redacted[str(key)] = str(value)
+    return redacted
 
 
 def peer_host(conn: Any) -> str | None:

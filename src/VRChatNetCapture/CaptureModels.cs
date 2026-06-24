@@ -37,6 +37,9 @@ public sealed class SessionMetadata
     [JsonPropertyName("mode")]
     public string Mode { get; set; } = "local";
 
+    [JsonPropertyName("packet_only")]
+    public bool PacketOnly { get; set; }
+
     [JsonPropertyName("local_target")]
     public string? LocalTarget { get; set; }
 

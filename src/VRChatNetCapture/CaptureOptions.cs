@@ -13,6 +13,7 @@ public sealed class CaptureOptions
     public bool KeepCert { get; init; }
     public bool NoUpdatePrompt { get; init; }
     public bool NoAnalysisPrompts { get; init; }
+    public bool PacketOnly { get; init; }
     public bool? DecodeOsc { get; init; }
     public bool StoreOscValues { get; init; }
     public bool? PhotonMetadata { get; init; }
@@ -72,6 +73,10 @@ public sealed class CaptureOptions
                     break;
                 case "--no-analysis-prompts":
                     options.NoAnalysisPrompts = true;
+                    break;
+                case "--packet-only":
+                    options.PacketOnly = true;
+                    options.RawUdpCapture = true;
                     break;
                 case "--decode-osc":
                     options.DecodeOsc = true;
@@ -138,6 +143,7 @@ public sealed class CaptureOptions
           --no-cert-install          Skip CurrentUser root CA install.
           --keep-cert                Keep a session-installed CA after stop.
           --no-update-prompt         Do not ask to update mitmproxy dependencies.
+          --packet-only              Run passive raw UDP capture without mitmproxy or CA changes.
           --decode-osc               Decode observed OSC UDP datagrams.
           --store-osc-values         Store OSC argument values instead of redacting them.
           --photon-metadata          Summarize proxy-observed Photon-like UDP metadata.
@@ -170,6 +176,7 @@ public sealed class CaptureOptions
         public bool KeepCert { get; set; }
         public bool NoUpdatePrompt { get; set; }
         public bool NoAnalysisPrompts { get; set; }
+        public bool PacketOnly { get; set; }
         public bool? DecodeOsc { get; set; }
         public bool StoreOscValues { get; set; }
         public bool? PhotonMetadata { get; set; }
@@ -192,6 +199,7 @@ public sealed class CaptureOptions
                 KeepCert = KeepCert,
                 NoUpdatePrompt = NoUpdatePrompt,
                 NoAnalysisPrompts = NoAnalysisPrompts,
+                PacketOnly = PacketOnly,
                 DecodeOsc = DecodeOsc,
                 StoreOscValues = StoreOscValues,
                 PhotonMetadata = PhotonMetadata,

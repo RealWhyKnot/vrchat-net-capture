@@ -11,6 +11,7 @@ Set-Location $PSScriptRoot
 try { & git config --local core.hooksPath .githooks 2>$null } catch {}
 
 $BuildDir = Join-Path $PSScriptRoot "dist"
+$BuildCapturesDir = Join-Path $BuildDir "captures"
 $StateFile = Join-Path $PSScriptRoot ".local_build_state.json"
 $CreatePackage = $Package -and -not $SkipZip
 
@@ -37,7 +38,11 @@ $VersionFile = Join-Path $PSScriptRoot "version.txt"
 [System.IO.File]::WriteAllText($VersionFile, $FullVersion, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Building Version: $FullVersion" -ForegroundColor Cyan
 
-if (Test-Path $BuildDir) { Remove-Item $BuildDir -Recurse -Force }
+if (Test-Path $BuildDir) {
+    Get-ChildItem -LiteralPath $BuildDir -Force |
+        Where-Object { $_.Name -ne "captures" } |
+        Remove-Item -Recurse -Force
+}
 New-Item -ItemType Directory $BuildDir -Force | Out-Null
 
 Write-Host "`n--- Publishing ---" -ForegroundColor Cyan
@@ -70,7 +75,7 @@ Get-ChildItem $BuildDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorActi
 
 $InstallManifestPath = Join-Path $BuildDir "release-manifest.tsv"
 $InstallManifestLines = Get-ChildItem $BuildDir -Recurse -File |
-    Where-Object { $_.FullName -ne $InstallManifestPath } |
+    Where-Object { $_.FullName -ne $InstallManifestPath -and -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase) } |
     Sort-Object FullName |
     ForEach-Object {
         $relPath = $_.FullName.Substring($BuildDir.Length + 1) -replace '\\', '/'
@@ -90,13 +95,17 @@ if ($CreatePackage) {
     $ZipPath = Join-Path $ArtifactRoot "VRChatNetCapture-v$FullVersion.zip"
     if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
-    $PackageFiles = Get-ChildItem $BuildDir -Recurse -File | Sort-Object FullName
+    $PackageFiles = Get-ChildItem $BuildDir -Recurse -File |
+        Where-Object { -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Sort-Object FullName
     $manifestLines = $PackageFiles | ForEach-Object {
         $relPath = $_.FullName.Substring($BuildDir.Length + 1) -replace '\\', '/'
         $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
         "$sha`t$($_.Length)`t$relPath"
     }
-    $PackageInputs = Get-ChildItem $BuildDir -Force | ForEach-Object { $_.FullName }
+    $PackageInputs = Get-ChildItem $BuildDir -Force |
+        Where-Object { $_.Name -ne "captures" } |
+        ForEach-Object { $_.FullName }
     [System.IO.File]::WriteAllLines($ManifestPath, [string[]]$manifestLines, [System.Text.UTF8Encoding]::new($false))
     Write-Host "Manifest: $ManifestPath ($($manifestLines.Count) files)" -ForegroundColor Cyan
 

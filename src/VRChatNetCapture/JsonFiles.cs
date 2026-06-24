@@ -10,6 +10,12 @@ public static class JsonFiles
         WriteIndented = true,
     };
 
+    public static readonly JsonSerializerOptions JsonLineOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = false,
+    };
+
     public static void Write<T>(string path, T value)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

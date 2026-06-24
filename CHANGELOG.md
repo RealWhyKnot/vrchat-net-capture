@@ -10,10 +10,13 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 - Startup now asks before updating mitmproxy dependencies.
 - Startup now asks before enabling OSC decoding, Photon-like UDP metadata, and Unity bundle metadata; all default to no.
 - Added optional passive WinDivert raw UDP capture for selected realtime and OSC ports, with PCAPNG, packet index, and offline OSC/Photon metadata postprocessing.
+- Added `--packet-only` for passive UDP capture without mitmproxy, CA installation, or proxy changes.
+- Raw UDP capture now adds currently observed VRChat-owned UDP socket ports to the WinDivert filter.
 - Added OSC datagram decoding for observed UDP stream payloads, with OSC argument values redacted unless explicitly enabled.
 - Added proxy-observed Photon-like UDP metadata summaries for observed stream payloads; payload semantics are not decoded.
 - Stream-derived UDP/TCP analysis records now label `capture_semantics` so proxy-observed data is not confused with passive wire-copy packet capture.
+- Redacts sensitive HTTP headers in JSON outputs and no longer writes native mitmproxy flow dumps by default.
 - Session-installed mitmproxy CA certificates are removed on stop by exact thumbprint unless `-KeepCert` is used.
-- Captures now include `events.jsonl`, `events.json`, `summary.json`, `flows.mitm`, WebSocket payloads, stream payloads, and VRChat output-log URL correlation.
+- Captures now include `events.jsonl`, `events.json`, `summary.json`, WebSocket payloads, stream payloads, and VRChat output-log URL correlation.
 - Consolidated user documentation into README and removed standalone design/recon docs.
 - Changed the project license from MIT to GPL-3.0-or-later and added release notices for bundled/runtime components.

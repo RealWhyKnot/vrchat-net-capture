@@ -109,7 +109,26 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             line = line.strip()
             if not line:
                 continue
-            records.append(json.loads(line))
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                return read_json_stream(path)
+    return records
+
+
+def read_json_stream(path: Path) -> list[dict[str, Any]]:
+    text = path.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    records: list[dict[str, Any]] = []
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            break
+        record, index = decoder.raw_decode(text, index)
+        if isinstance(record, dict):
+            records.append(record)
     return records
 
 

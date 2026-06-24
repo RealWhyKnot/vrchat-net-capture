@@ -149,7 +149,7 @@ public static class RawUdpCaptureWorker
                 ProcessId = null,
                 PidConfidence = "none",
             };
-            var json = JsonSerializer.Serialize(index, JsonFiles.Options);
+            var json = JsonSerializer.Serialize(index, JsonFiles.JsonLineOptions);
             await indexWriter.WriteLineAsync(json).ConfigureAwait(false);
             await datagramWriter.WriteLineAsync(json).ConfigureAwait(false);
         }

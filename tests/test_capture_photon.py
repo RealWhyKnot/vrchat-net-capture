@@ -25,6 +25,22 @@ class CapturePhotonTests(unittest.TestCase):
         self.assertEqual(photon["payload_semantics"], "not decoded")
         self.assertEqual(photon["header_guess"]["command_count"], 1)
 
+    def test_classifies_realtime_27002_port(self) -> None:
+        event = {
+            "direction": "outbound",
+            "source_port": 50507,
+            "destination_port": 27002,
+            "capture_semantics": "wire_copy",
+        }
+        payload = b"\x00" * 32
+
+        photon = classify_photon_packet(event, payload)
+
+        self.assertIsNotNone(photon)
+        assert photon is not None
+        self.assertEqual(photon["ports"], [27002])
+        self.assertEqual(photon["capture_semantics"], "wire_copy")
+
     def test_summary_counts_candidates(self) -> None:
         summary = build_photon_summary(
             [

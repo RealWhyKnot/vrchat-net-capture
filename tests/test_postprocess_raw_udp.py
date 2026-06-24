@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from postprocess_raw_udp import main
+from postprocess_raw_udp import main, read_jsonl
 
 
 def osc_string(value: str) -> bytes:
@@ -14,6 +14,18 @@ def osc_string(value: str) -> bytes:
 
 
 class PostprocessRawUdpTests(unittest.TestCase):
+    def test_read_jsonl_accepts_legacy_pretty_json_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "udp-datagrams.jsonl"
+            path.write_text(
+                json.dumps({"packet_number": 1}, indent=2) + "\n" + json.dumps({"packet_number": 2}, indent=2),
+                encoding="utf-8",
+            )
+
+            records = read_jsonl(path)
+
+            self.assertEqual([r["packet_number"] for r in records], [1, 2])
+
     def test_postprocess_decodes_raw_osc_and_photon_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

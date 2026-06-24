@@ -59,6 +59,7 @@ Useful options:
 .\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
 .\VRChatNetCapture.exe --keep-cert
 .\VRChatNetCapture.exe --no-update-prompt
+.\VRChatNetCapture.exe --packet-only --decode-osc --photon-metadata
 .\VRChatNetCapture.exe --decode-osc
 .\VRChatNetCapture.exe --photon-metadata
 .\VRChatNetCapture.exe --unity-metadata
@@ -67,6 +68,10 @@ Useful options:
 .\VRChatNetCapture.exe --no-analysis-prompts
 .\VRChatNetCapture.exe stop
 ```
+
+When raw UDP capture is enabled, VRChat Net Capture also adds UDP ports owned by
+the currently running `VRChat.exe` process to the capture filter. This helps
+existing sessions where VRChat has already opened dynamic local UDP ports.
 
 Use `stop` if a capture window was closed before cleanup ran.
 
@@ -92,7 +97,6 @@ captures/<timestamp>/
 |-- network/payloads/<sha>.udp.bin
 |-- osc/osc-events.jsonl          # optional passive OSC analysis
 |-- photon/photon-packets.jsonl   # optional passive Photon-like metadata
-|-- flows.mitm                    # native mitmproxy dump
 |-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
 |-- vrchat-log-unmatched.jsonl    # log URLs not matched by captured HTTP flows
 |-- bodies/<sha256>.bin
@@ -137,6 +141,10 @@ Common patterns:
 - Optional passive raw UDP packet evidence under `network/` when
   `--raw-udp-capture` is enabled.
 
+Use `--packet-only` for the least intrusive live-session capture. It skips
+mitmproxy, CA installation, and proxy changes, then runs only the passive raw UDP
+backend plus offline analysis.
+
 ## Limits
 
 - Photon payload semantics are not decoded. With `--photon-metadata`,
@@ -154,6 +162,8 @@ Common patterns:
 - Certificate pinning can prevent HTTPS interception. Look for
   `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
   and unmatched VRChat log URLs.
+- Sensitive HTTP headers such as authorization and cookie headers are redacted
+  in JSON outputs. Native mitmproxy dump files are not written by default.
 - Unity asset bundles are detected by magic bytes and archived. With
   `--unity-metadata`, UnityPy can write a bounded object-type metadata peek when
   it is installed. Exporting textures, meshes, audio, video, scripts, scenes, or

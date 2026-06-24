@@ -1,10 +1,13 @@
 using VRChatNetCapture;
+using System.Text.Json;
 
 var tests = new (string Name, Action Body)[]
 {
     ("default options use local VRChat target", TestDefaultOptions),
     ("stop command parses", TestStopCommand),
     ("analysis options parse and default off", TestAnalysisOptions),
+    ("packet-only option implies raw UDP", TestPacketOnlyOptions),
+    ("UDP endpoint discovery parses netstat output", TestUdpEndpointDiscovery),
     ("raw UDP worker options parse", TestRawUdpOptions),
     ("UDP parser and PCAP writer handle IPv4 datagrams", TestUdpParserAndPcapWriter),
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
@@ -42,6 +45,7 @@ static void TestDefaultOptions()
     Equal(null, options.PhotonMetadata);
     Equal(null, options.UnityMetadata);
     Equal(null, options.RawUdpCapture);
+    False(options.PacketOnly);
 }
 
 static void TestStopCommand()
@@ -70,11 +74,24 @@ static void TestAnalysisOptions()
     Equal("5055,9000-9001", enabled.RawUdpPorts);
     True(enabled.NoAnalysisPrompts);
 
+    var packetOnly = CaptureOptions.Parse(["--packet-only"]);
+    True(packetOnly.PacketOnly);
+    Equal(true, packetOnly.RawUdpCapture);
+
     var disabled = CaptureOptions.Parse(["--no-decode-osc", "--no-photon-metadata", "--no-unity-metadata", "--no-raw-udp-capture"]);
     Equal(false, disabled.DecodeOsc);
     Equal(false, disabled.PhotonMetadata);
     Equal(false, disabled.UnityMetadata);
     Equal(false, disabled.RawUdpCapture);
+}
+
+static void TestPacketOnlyOptions()
+{
+    var options = CaptureOptions.Parse(["--packet-only", "--decode-osc", "--photon-metadata"]);
+    True(options.PacketOnly);
+    Equal(true, options.RawUdpCapture);
+    Equal(true, options.DecodeOsc);
+    Equal(true, options.PhotonMetadata);
 }
 
 static void TestRawUdpOptions()
@@ -90,6 +107,27 @@ static void TestRawUdpOptions()
     var filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
     True(filter.Contains("udp.SrcPort == 5055", StringComparison.Ordinal));
     True(filter.Contains("udp.DstPort == 9001", StringComparison.Ordinal));
+
+    var line = JsonSerializer.Serialize(new RawUdpPacketIndex { PacketNumber = 1 }, JsonFiles.JsonLineOptions);
+    False(line.Contains('\n'));
+}
+
+static void TestUdpEndpointDiscovery()
+{
+    const string output = """
+      Proto  Local Address          Foreign Address        State           PID
+      UDP    0.0.0.0:9000           *:*                                    40224
+      UDP    0.0.0.0:61465          *:*                                    40224
+      UDP    [::]:5353              *:*                                    40224
+      UDP    0.0.0.0:9999           *:*                                    1234
+    """;
+
+    var ports = UdpEndpointDiscovery.ParseNetstatUdpPorts(output, new HashSet<int> { 40224 });
+
+    Equal(3, ports.Count);
+    Contains(ports, 5353);
+    Contains(ports, 9000);
+    Contains(ports, 61465);
 }
 
 static void TestUdpParserAndPcapWriter()
@@ -149,6 +187,8 @@ static void TestMitmdumpArgs()
     var local = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session);
     Contains(local, "local:VRChat.exe");
     False(local.Contains("--listen-port"));
+    False(local.Contains("-w"));
+    False(local.Contains(Path.Combine(session.CaptureDir, "flows.mitm")));
 
     var regularOptions = CaptureOptions.Parse(["--mode", "regular", "--listen-port", "8081", "--ignore-hosts", "example.test"]);
     var regular = CaptureApp.BuildMitmdumpArguments(regularOptions, paths, session);
