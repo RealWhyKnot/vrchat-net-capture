@@ -4,6 +4,8 @@ namespace VRChatNetCapture;
 
 public static class UdpEndpointDiscovery
 {
+    private static readonly HashSet<int> ExcludedPorts = [5353];
+
     public static async Task<IReadOnlyList<int>> FindUdpPortsForProcessAsync(
         string processName,
         CancellationToken cancellationToken)
@@ -55,7 +57,7 @@ public static class UdpEndpointDiscovery
             }
 
             var port = ParseEndpointPort(parts[1]);
-            if (port is > 0 and <= 65535)
+            if (port is > 0 and <= 65535 && !ExcludedPorts.Contains(port.Value))
             {
                 ports.Add(port.Value);
             }

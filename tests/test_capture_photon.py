@@ -11,7 +11,7 @@ class CapturePhotonTests(unittest.TestCase):
         event = {
             "direction": "client_to_server",
             "client": {"sockname": "127.0.0.1:53000"},
-            "server": {"address": "203.0.113.10:5055"},
+            "server": {"address": "203.0.113.10:27002"},
         }
         payload = struct.pack(">HBBII", 1, 0, 1, 123, 456) + (b"\x00" * 12)
 
@@ -20,7 +20,7 @@ class CapturePhotonTests(unittest.TestCase):
         self.assertIsNotNone(photon)
         assert photon is not None
         self.assertEqual(photon["confidence"], "medium")
-        self.assertEqual(photon["ports"], [5055])
+        self.assertEqual(photon["ports"], [27002])
         self.assertEqual(photon["capture_semantics"], "proxy_observed")
         self.assertEqual(photon["payload_semantics"], "not decoded")
         self.assertEqual(photon["header_guess"]["command_count"], 1)
@@ -44,13 +44,13 @@ class CapturePhotonTests(unittest.TestCase):
     def test_summary_counts_candidates(self) -> None:
         summary = build_photon_summary(
             [
-                {"direction": "client_to_server", "photon": {"confidence": "low", "ports": [5058]}},
+                {"direction": "client_to_server", "photon": {"confidence": "low", "ports": [27002]}},
                 {"direction": "server_to_client"},
             ]
         )
 
         self.assertEqual(summary["candidate_packet_count"], 1)
-        self.assertEqual(summary["ports"]["5058"], 1)
+        self.assertEqual(summary["ports"]["27002"], 1)
         self.assertEqual(summary["capture_semantics"], "proxy_observed")
         self.assertEqual(summary["payload_semantics"], "not decoded")
 

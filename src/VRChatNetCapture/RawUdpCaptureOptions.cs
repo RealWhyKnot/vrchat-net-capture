@@ -5,14 +5,16 @@ namespace VRChatNetCapture;
 public sealed class RawUdpCaptureOptions
 {
     public string CaptureDir { get; init; } = "";
-    public string Ports { get; init; } = "5055,5056,5058,27000-27002,9000,9001";
+    public string Ports { get; init; } = "27000-27002,9000,9001";
     public string StopFile { get; init; } = "";
+    public int? ParentPid { get; init; }
 
     public static RawUdpCaptureOptions Parse(string[] args)
     {
         var captureDir = "";
-        var ports = "5055,5056,5058,27000-27002,9000,9001";
+        var ports = "27000-27002,9000,9001";
         var stopFile = "";
+        int? parentPid = null;
         var index = 0;
         while (index < args.Length)
         {
@@ -28,6 +30,9 @@ public sealed class RawUdpCaptureOptions
                 case "--stop-file":
                     stopFile = RequireValue(args, ref index, arg);
                     break;
+                case "--parent-pid":
+                    parentPid = ParseParentPid(RequireValue(args, ref index, arg));
+                    break;
                 default:
                     throw new ArgumentException($"Unknown raw UDP worker argument '{arg}'.");
             }
@@ -42,6 +47,7 @@ public sealed class RawUdpCaptureOptions
             CaptureDir = Path.GetFullPath(captureDir),
             Ports = ports,
             StopFile = string.IsNullOrWhiteSpace(stopFile) ? Path.Combine(Path.GetFullPath(captureDir), ".raw-udp.stop") : Path.GetFullPath(stopFile),
+            ParentPid = parentPid,
         };
     }
 
@@ -92,6 +98,15 @@ public sealed class RawUdpCaptureOptions
             throw new ArgumentException($"Invalid UDP port '{value}'.");
         }
         return port;
+    }
+
+    private static int ParseParentPid(string value)
+    {
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) || pid <= 0)
+        {
+            throw new ArgumentException($"Invalid parent PID '{value}'.");
+        }
+        return pid;
     }
 
     private static string RequireValue(string[] args, ref int index, string option)

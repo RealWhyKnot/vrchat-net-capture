@@ -31,16 +31,29 @@ public static class ProcessTools
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        Track(process, requireTracked: false);
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
         var stdoutTask = ReadToEndAsync(process.StandardOutput, stdout, cancellationToken);
         var stderrTask = ReadToEndAsync(process.StandardError, stderr, cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
-        return new ProcessResult { ExitCode = process.ExitCode, Stdout = stdout.ToString(), Stderr = stderr.ToString() };
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+            return new ProcessResult { ExitCode = process.ExitCode, Stdout = stdout.ToString(), Stderr = stderr.ToString() };
+        }
+        catch
+        {
+            TryKill(process);
+            throw;
+        }
     }
 
-    public static Process StartInteractive(string fileName, IEnumerable<string> args, string workingDirectory)
+    public static Process StartInteractive(
+        string fileName,
+        IEnumerable<string> args,
+        string workingDirectory,
+        bool requireTracked = true)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -54,15 +67,22 @@ public static class ProcessTools
         {
             startInfo.ArgumentList.Add(arg);
         }
-        return Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        Track(process, requireTracked);
+        return process;
     }
 
     public static Process StartBackground(
         string fileName,
         IEnumerable<string> args,
         string workingDirectory,
-        bool elevate = false)
+        bool elevate = false,
+        bool requireTracked = true)
     {
+        if (elevate && !IsAdministrator() && requireTracked)
+        {
+            throw new InvalidOperationException("Tracked child processes cannot be launched through UAC elevation. Run VRChat Net Capture as Administrator.");
+        }
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -79,7 +99,9 @@ public static class ProcessTools
         {
             startInfo.ArgumentList.Add(arg);
         }
-        return Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        Track(process, requireTracked);
+        return process;
     }
 
     public static bool IsAdministrator()
@@ -103,6 +125,48 @@ public static class ProcessTools
                 return;
             }
             output.Append(buffer, 0, read);
+        }
+    }
+
+    private static void Track(Process process, bool requireTracked)
+    {
+        var tracker = ChildProcessTracker.Current;
+        if (tracker is null)
+        {
+            if (requireTracked)
+            {
+                TryKill(process);
+                throw new InvalidOperationException("Child process tracking is not active.");
+            }
+            return;
+        }
+
+        try
+        {
+            tracker.Add(process);
+        }
+        catch
+        {
+            if (requireTracked)
+            {
+                TryKill(process);
+                throw;
+            }
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
         }
     }
 }

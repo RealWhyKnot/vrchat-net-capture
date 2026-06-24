@@ -25,6 +25,8 @@ public static class RawUdpCaptureWorker
             var ports = RawUdpCaptureOptions.ParsePorts(options.Ports);
             var filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
             await log.WriteLineAsync($"filter={filter}").ConfigureAwait(false);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var parentWatch = WatchParentAsync(options.ParentPid, options.StopFile, ports, log, linkedCts.Token);
 
             var handle = WinDivertNative.WinDivertOpen(
                 filter,
@@ -38,11 +40,13 @@ public static class RawUdpCaptureWorker
 
             try
             {
-                await CaptureLoopAsync(handle, networkDir, payloadDir, ports, options.StopFile, cancellationToken)
+                await CaptureLoopAsync(handle, networkDir, payloadDir, ports, options.StopFile, linkedCts.Token)
                     .ConfigureAwait(false);
             }
             finally
             {
+                await linkedCts.CancelAsync().ConfigureAwait(false);
+                await parentWatch.ConfigureAwait(false);
                 _ = WinDivertNative.WinDivertClose(handle);
             }
             return 0;
@@ -152,6 +156,66 @@ public static class RawUdpCaptureWorker
             var json = JsonSerializer.Serialize(index, JsonFiles.JsonLineOptions);
             await indexWriter.WriteLineAsync(json).ConfigureAwait(false);
             await datagramWriter.WriteLineAsync(json).ConfigureAwait(false);
+        }
+    }
+
+    private static Task WatchParentAsync(
+        int? parentPid,
+        string stopFile,
+        IReadOnlyList<int> ports,
+        StreamWriter log,
+        CancellationToken cancellationToken)
+    {
+        if (parentPid is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Task.Run(
+            async () =>
+            {
+                try
+                {
+                    using var parent = System.Diagnostics.Process.GetProcessById(parentPid.Value);
+                    await parent.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch
+                {
+                }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                await log.WriteLineAsync("parent process exited; stopping raw UDP worker").ConfigureAwait(false);
+                SignalStop(stopFile, ports);
+            },
+            CancellationToken.None);
+    }
+
+    private static void SignalStop(string stopFile, IReadOnlyList<int> ports)
+    {
+        try
+        {
+            File.WriteAllText(stopFile, DateTimeOffset.UtcNow.ToString("O"));
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var port = ports.Contains(9001) ? 9001 : ports[0];
+            using var udp = new System.Net.Sockets.UdpClient();
+            udp.Send([0], 1, "127.0.0.1", port);
+        }
+        catch
+        {
         }
     }
 }

@@ -4,7 +4,7 @@ import struct
 from collections import Counter
 from typing import Any
 
-PHOTON_PORTS = {5055, 5056, 5058, 27000, 27001, 27002}
+PHOTON_PORTS = {27000, 27001, 27002}
 
 
 def classify_photon_packet(event: dict[str, Any], payload: bytes) -> dict[str, Any] | None:

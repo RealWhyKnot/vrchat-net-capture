@@ -3,12 +3,14 @@ using System.Text.Json;
 
 var tests = new (string Name, Action Body)[]
 {
-    ("default options use local VRChat target", TestDefaultOptions),
+    ("default options use regular proxy mode", TestDefaultOptions),
     ("stop command parses", TestStopCommand),
     ("analysis options parse and default off", TestAnalysisOptions),
+    ("local mode is rejected", TestLocalModeRejected),
     ("packet-only option implies raw UDP", TestPacketOnlyOptions),
     ("UDP endpoint discovery parses netstat output", TestUdpEndpointDiscovery),
     ("raw UDP worker options parse", TestRawUdpOptions),
+    ("raw UDP worker args link parent process", TestRawUdpWorkerArgs),
     ("UDP parser and PCAP writer handle IPv4 datagrams", TestUdpParserAndPcapWriter),
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
@@ -38,14 +40,15 @@ static void TestDefaultOptions()
 {
     var options = CaptureOptions.Parse([]);
     Equal("start", options.Command);
-    Equal("local", options.Mode);
-    Equal("VRChat.exe", options.LocalTarget);
+    Equal("regular", options.Mode);
     Equal(8080, options.ListenPort);
     Equal(null, options.DecodeOsc);
     Equal(null, options.PhotonMetadata);
     Equal(null, options.UnityMetadata);
     Equal(null, options.RawUdpCapture);
     False(options.PacketOnly);
+    Equal("", options.MitmAllowHosts);
+    Equal("", options.MitmIgnoreHosts);
 }
 
 static void TestStopCommand()
@@ -63,7 +66,7 @@ static void TestAnalysisOptions()
         "--unity-metadata",
         "--raw-udp-capture",
         "--raw-udp-ports",
-        "5055,9000-9001",
+        "27002,9000-9001",
         "--no-analysis-prompts",
     ]);
     Equal(true, enabled.DecodeOsc);
@@ -71,18 +74,37 @@ static void TestAnalysisOptions()
     Equal(true, enabled.PhotonMetadata);
     Equal(true, enabled.UnityMetadata);
     Equal(true, enabled.RawUdpCapture);
-    Equal("5055,9000-9001", enabled.RawUdpPorts);
+    Equal("27002,9000-9001", enabled.RawUdpPorts);
     True(enabled.NoAnalysisPrompts);
 
     var packetOnly = CaptureOptions.Parse(["--packet-only"]);
     True(packetOnly.PacketOnly);
     Equal(true, packetOnly.RawUdpCapture);
 
-    var disabled = CaptureOptions.Parse(["--no-decode-osc", "--no-photon-metadata", "--no-unity-metadata", "--no-raw-udp-capture"]);
+    var disabled = CaptureOptions.Parse([
+        "--mode",
+        "regular",
+        "--no-decode-osc",
+        "--no-photon-metadata",
+        "--no-unity-metadata",
+        "--no-raw-udp-capture",
+        "--mitm-allow-hosts",
+        "",
+        "--mitm-ignore-hosts",
+        "",
+    ]);
     Equal(false, disabled.DecodeOsc);
     Equal(false, disabled.PhotonMetadata);
     Equal(false, disabled.UnityMetadata);
     Equal(false, disabled.RawUdpCapture);
+    Equal("", disabled.MitmAllowHosts);
+    Equal("", disabled.MitmIgnoreHosts);
+}
+
+static void TestLocalModeRejected()
+{
+    Throws(() => CaptureOptions.Parse(["--mode", "local"]));
+    Throws(() => CaptureOptions.Parse(["--local-target", "VRChat.exe"]));
 }
 
 static void TestPacketOnlyOptions()
@@ -96,20 +118,46 @@ static void TestPacketOnlyOptions()
 
 static void TestRawUdpOptions()
 {
-    var options = RawUdpCaptureOptions.Parse(["--capture-dir", "C:\\capture", "--ports", "5055,9000-9001"]);
-    Equal("5055,9000-9001", options.Ports);
+    var options = RawUdpCaptureOptions.Parse([
+        "--capture-dir",
+        "C:\\capture",
+        "--ports",
+        "27002,9000-9001",
+        "--parent-pid",
+        "1234",
+    ]);
+    Equal("27002,9000-9001", options.Ports);
+    Equal(1234, options.ParentPid);
     var ports = RawUdpCaptureOptions.ParsePorts(options.Ports);
     Equal(3, ports.Count);
-    Contains(ports, 5055);
+    Contains(ports, 27002);
     Contains(ports, 9000);
     Contains(ports, 9001);
 
     var filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
-    True(filter.Contains("udp.SrcPort == 5055", StringComparison.Ordinal));
+    True(filter.Contains("udp.SrcPort == 27002", StringComparison.Ordinal));
     True(filter.Contains("udp.DstPort == 9001", StringComparison.Ordinal));
 
     var line = JsonSerializer.Serialize(new RawUdpPacketIndex { PacketNumber = 1 }, JsonFiles.JsonLineOptions);
     False(line.Contains('\n'));
+}
+
+static void TestRawUdpWorkerArgs()
+{
+    var session = new CaptureSession
+    {
+        CaptureDir = "C:\\capture",
+    };
+    var analysis = new AnalysisOptions
+    {
+        RawUdpPorts = "27002,9000-9001",
+    };
+    var args = CaptureApp.BuildRawUdpWorkerArguments(session, analysis, 1234);
+    Contains(args, "raw-udp-worker");
+    Contains(args, "--parent-pid");
+    Contains(args, "1234");
+    Contains(args, "--stop-file");
+    Contains(args, Path.Combine("C:\\capture", ".raw-udp.stop"));
 }
 
 static void TestUdpEndpointDiscovery()
@@ -124,8 +172,7 @@ static void TestUdpEndpointDiscovery()
 
     var ports = UdpEndpointDiscovery.ParseNetstatUdpPorts(output, new HashSet<int> { 40224 });
 
-    Equal(3, ports.Count);
-    Contains(ports, 5353);
+    Equal(2, ports.Count);
     Contains(ports, 9000);
     Contains(ports, 61465);
 }
@@ -180,21 +227,25 @@ static void TestMitmdumpArgs()
 {
     var root = Path.Combine(Path.GetTempPath(), "vcnc-tests");
     var paths = new CapturePaths(root, Path.Combine(root, "captures"));
+    Equal(Path.Combine(root, "python"), paths.PythonDir);
+    Equal(Path.Combine(root, "python", "capture_addon.py"), paths.AddonPath);
     var session = new CaptureSession
     {
         CaptureDir = Path.Combine(root, "captures", "one"),
     };
-    var local = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session);
-    Contains(local, "local:VRChat.exe");
-    False(local.Contains("--listen-port"));
-    False(local.Contains("-w"));
-    False(local.Contains(Path.Combine(session.CaptureDir, "flows.mitm")));
+    var defaultArgs = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session);
+    Contains(defaultArgs, "regular");
+    Contains(defaultArgs, "--listen-port");
+    Contains(defaultArgs, "8080");
+    False(defaultArgs.Contains("--allow-hosts"));
+    False(defaultArgs.Contains("--ignore-hosts"));
 
     var regularOptions = CaptureOptions.Parse(["--mode", "regular", "--listen-port", "8081", "--ignore-hosts", "example.test"]);
     var regular = CaptureApp.BuildMitmdumpArguments(regularOptions, paths, session);
     Contains(regular, "regular");
     Contains(regular, "8081");
     Contains(regular, "ignore_hosts_list=example.test");
+    False(regular.Any(static arg => arg.StartsWith("local", StringComparison.OrdinalIgnoreCase)));
 
     var analysis = new AnalysisOptions
     {
@@ -208,6 +259,7 @@ static void TestMitmdumpArgs()
     Contains(analysisArgs, "store_osc_values=false");
     Contains(analysisArgs, "photon_metadata=true");
     Contains(analysisArgs, "unity_metadata=true");
+
 }
 
 static void True(bool condition)
@@ -224,6 +276,20 @@ static void False(bool condition)
     {
         throw new InvalidOperationException("Expected false.");
     }
+}
+
+static void Throws(Action action)
+{
+    try
+    {
+        action();
+    }
+    catch
+    {
+        return;
+    }
+
+    throw new InvalidOperationException("Expected exception.");
 }
 
 static void Equal<T>(T expected, T actual)

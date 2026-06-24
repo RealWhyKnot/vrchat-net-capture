@@ -8,8 +8,6 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from mitmproxy import ctx, http
-
 from capture_events import (
     build_event,
     build_summary,
@@ -28,6 +26,7 @@ from capture_photon import build_photon_summary, classify_photon_packet
 from capture_records import build_http_record, save_body, write_websocket_payload
 from capture_utils import append_jsonl, relative_artifact_path, write_per_host
 from capture_vrchat_logs import mark_unmatched_log_urls, newest_output_log, parse_vrchat_log
+from mitmproxy import ctx, http
 
 try:
     import UnityPy  # type: ignore

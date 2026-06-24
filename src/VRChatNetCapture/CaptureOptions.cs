@@ -5,10 +5,11 @@ namespace VRChatNetCapture;
 public sealed class CaptureOptions
 {
     public string Command { get; init; } = "start";
-    public string Mode { get; init; } = "local";
-    public string LocalTarget { get; init; } = "VRChat.exe";
+    public string Mode { get; init; } = "regular";
     public int ListenPort { get; init; } = 8080;
     public string IgnoreHosts { get; init; } = "";
+    public string MitmAllowHosts { get; init; } = "";
+    public string MitmIgnoreHosts { get; init; } = "";
     public bool NoCertInstall { get; init; }
     public bool KeepCert { get; init; }
     public bool NoUpdatePrompt { get; init; }
@@ -19,7 +20,7 @@ public sealed class CaptureOptions
     public bool? PhotonMetadata { get; init; }
     public bool? UnityMetadata { get; init; }
     public bool? RawUdpCapture { get; init; }
-    public string RawUdpPorts { get; init; } = "5055,5056,5058,27000-27002,9000,9001";
+    public string RawUdpPorts { get; init; } = "27000-27002,9000,9001";
     public string? CaptureRoot { get; init; }
     public bool ShowHelp { get; init; }
     public bool ShowVersion { get; init; }
@@ -50,14 +51,17 @@ public sealed class CaptureOptions
                 case "--mode":
                     options.Mode = RequireValue(args, ref index, arg).ToLowerInvariant();
                     break;
-                case "--local-target":
-                    options.LocalTarget = RequireValue(args, ref index, arg);
-                    break;
                 case "--listen-port":
                     options.ListenPort = int.Parse(RequireValue(args, ref index, arg), CultureInfo.InvariantCulture);
                     break;
                 case "--ignore-hosts":
                     options.IgnoreHosts = RequireValue(args, ref index, arg);
+                    break;
+                case "--mitm-ignore-hosts":
+                    options.MitmIgnoreHosts = RequireValue(args, ref index, arg);
+                    break;
+                case "--mitm-allow-hosts":
+                    options.MitmAllowHosts = RequireValue(args, ref index, arg);
                     break;
                 case "--capture-root":
                     options.CaptureRoot = RequireValue(args, ref index, arg);
@@ -117,29 +121,33 @@ public sealed class CaptureOptions
         {
             throw new ArgumentException("Command must be 'start' or 'stop'.");
         }
-        if (options.Mode is not ("local" or "regular"))
+        if (options.Mode is not "regular")
         {
-            throw new ArgumentException("--mode must be 'local' or 'regular'.");
+            throw new ArgumentException("--mode local has been removed; only --mode regular is supported.");
         }
         if (options.ListenPort is < 1 or > 65535)
         {
             throw new ArgumentException("--listen-port must be between 1 and 65535.");
         }
-
         return options.ToImmutable();
     }
 
     public static string Usage(string exeName) =>
         $"""
         Usage:
-          {exeName} [start] [--mode local|regular] [--local-target VRChat.exe] [--listen-port 8080]
+          {exeName} [start] [--listen-port 8080]
+          {exeName} start --packet-only
           {exeName} stop
 
         Defaults:
-          start, --mode local, --local-target VRChat.exe
+          start, --mode regular, --listen-port 8080
 
         Options:
+          --mode <mode>              Capture mode. Only regular is supported.
+          --listen-port <port>       Local proxy port for explicit --mode regular. Default: 8080.
           --ignore-hosts <hosts>     Comma-separated hosts to skip writing.
+          --mitm-allow-hosts <rx>    mitmproxy host:port regex to actively capture.
+          --mitm-ignore-hosts <rx>   mitmproxy host:port regex to pass through unmodified.
           --no-cert-install          Skip CurrentUser root CA install.
           --keep-cert                Keep a session-installed CA after stop.
           --no-update-prompt         Do not ask to update mitmproxy dependencies.
@@ -149,7 +157,7 @@ public sealed class CaptureOptions
           --photon-metadata          Summarize proxy-observed Photon-like UDP metadata.
           --unity-metadata           Run optional Unity bundle metadata peeks.
           --raw-udp-capture          Capture selected UDP packets with passive WinDivert.
-          --raw-udp-ports <ports>    Raw UDP port list/ranges. Default: 5055,5056,5058,27000-27002,9000,9001.
+          --raw-udp-ports <ports>    Raw UDP port list/ranges. Default: 27000-27002,9000,9001.
           --no-analysis-prompts      Do not ask optional analyzer questions.
           --capture-root <path>      Override captures directory parent.
           --version                  Print version.
@@ -168,10 +176,11 @@ public sealed class CaptureOptions
     private sealed class MutableOptions
     {
         public string Command { get; set; } = "start";
-        public string Mode { get; set; } = "local";
-        public string LocalTarget { get; set; } = "VRChat.exe";
+        public string Mode { get; set; } = "regular";
         public int ListenPort { get; set; } = 8080;
         public string IgnoreHosts { get; set; } = "";
+        public string MitmAllowHosts { get; set; } = "";
+        public string MitmIgnoreHosts { get; set; } = "";
         public bool NoCertInstall { get; set; }
         public bool KeepCert { get; set; }
         public bool NoUpdatePrompt { get; set; }
@@ -182,7 +191,7 @@ public sealed class CaptureOptions
         public bool? PhotonMetadata { get; set; }
         public bool? UnityMetadata { get; set; }
         public bool? RawUdpCapture { get; set; }
-        public string RawUdpPorts { get; set; } = "5055,5056,5058,27000-27002,9000,9001";
+        public string RawUdpPorts { get; set; } = "27000-27002,9000,9001";
         public string? CaptureRoot { get; set; }
         public bool ShowHelp { get; set; }
         public bool ShowVersion { get; set; }
@@ -192,9 +201,10 @@ public sealed class CaptureOptions
             {
                 Command = Command,
                 Mode = Mode,
-                LocalTarget = LocalTarget,
                 ListenPort = ListenPort,
                 IgnoreHosts = IgnoreHosts,
+                MitmAllowHosts = MitmAllowHosts,
+                MitmIgnoreHosts = MitmIgnoreHosts,
                 NoCertInstall = NoCertInstall,
                 KeepCert = KeepCert,
                 NoUpdatePrompt = NoUpdatePrompt,

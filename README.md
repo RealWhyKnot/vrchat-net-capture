@@ -1,20 +1,20 @@
 # VRChat Net Capture
 
-VRChat Net Capture is a Windows capture tool for inspecting the HTTP(S),
-WebSocket, TLS/connect, DNS, TCP, UDP, and VRChat output-log evidence from a
-local VRChat session. The released app is `VRChatNetCapture.exe`; mitmproxy
-does the network interception and the bundled Python addon writes the capture
-artifacts.
+VRChat Net Capture is a Windows capture tool for inspecting passive UDP, OSC,
+Photon-like metadata, HTTP(S), WebSocket, TLS/connect, DNS, and VRChat
+output-log evidence from a local VRChat session. The released app is
+`VRChatNetCapture.exe`; regular system-proxy capture is the active HTTP/bundle
+mode, and packet-only capture is available for passive UDP-only sessions.
 
 The tool does not upload captures anywhere. Everything is written locally under
 `captures\<timestamp>\`.
 
 ## Security
 
-VRChat Net Capture installs the mitmproxy CA into `Cert:\CurrentUser\Root` while
-a capture is running. The default local capture mode targets `VRChat.exe`
-without changing the Windows system proxy. If you use `--mode regular`, the app
-also points Windows' system proxy at a local mitmdump instance.
+Active HTTP capture installs the mitmproxy CA into `Cert:\CurrentUser\Root`
+while a capture is running and points Windows' system proxy at a local mitmdump
+instance. Packet-only mode does not install a CA, run mitmproxy, or change the
+Windows system proxy.
 
 On stop, the app removes only the exact CA thumbprint that the current session
 installed. If that CA already existed before the session, it is left alone. Use
@@ -25,10 +25,9 @@ installed. If that CA already existed before the session, it is left alone. Use
 - Windows 10/11.
 - Python 3.11 or newer from python.org. The Microsoft Store `python.exe` stub is
   skipped.
-- mitmproxy 10.2 or newer. If it is missing, the app installs it with pip. On
-  startup, the app asks whether to update mitmproxy dependencies.
-- Administrator approval is required only when the optional passive raw UDP
-  packet capture backend is enabled.
+- mitmproxy is required for active HTTP capture.
+- Administrator approval is required for the default passive raw UDP packet
+  capture backend.
 
 ## Usage
 
@@ -40,21 +39,19 @@ From the release folder:
 
 Default behavior:
 
-1. Finds Python.
-2. Installs mitmproxy if missing.
-3. Asks whether to update mitmproxy.
+1. Requires VRChat to be closed.
+2. Finds Python and mitmproxy.
+3. Stashes current proxy settings, then points Windows at local mitmdump.
 4. Asks whether to enable optional OSC, Photon metadata, and Unity metadata
    analysis. Each defaults to no.
-5. Installs the mitmproxy CA for the current user.
-6. Starts `mitmdump --mode local:VRChat.exe`.
-7. Prints `READY`. Launch VRChat after that.
-8. On Ctrl+C, stops mitmdump and removes the session CA.
+5. Prints `READY`. Launch VRChat after that.
+6. On Ctrl+C, stops mitmdump, restores proxy settings, and removes any session-installed CA.
 
 Useful options:
 
 ```powershell
 .\VRChatNetCapture.exe --mode regular
-.\VRChatNetCapture.exe --mode local --local-target VRChat.exe
+.\VRChatNetCapture.exe --mitm-ignore-hosts "(?i)^(api\.vrchat\.cloud|pipeline\.vrchat\.cloud):443$"
 .\VRChatNetCapture.exe --listen-port 8081
 .\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
 .\VRChatNetCapture.exe --keep-cert
@@ -64,16 +61,23 @@ Useful options:
 .\VRChatNetCapture.exe --photon-metadata
 .\VRChatNetCapture.exe --unity-metadata
 .\VRChatNetCapture.exe --raw-udp-capture
-.\VRChatNetCapture.exe --raw-udp-ports 5055,5056,5058,27000-27002,9000,9001
+.\VRChatNetCapture.exe --raw-udp-ports 27000-27002,9000,9001
 .\VRChatNetCapture.exe --no-analysis-prompts
 .\VRChatNetCapture.exe stop
 ```
 
 When raw UDP capture is enabled, VRChat Net Capture also adds UDP ports owned by
 the currently running `VRChat.exe` process to the capture filter. This helps
-existing sessions where VRChat has already opened dynamic local UDP ports.
+existing sessions where VRChat has already opened dynamic local UDP ports. Raw
+UDP capture requires running VRChat Net Capture as Administrator. Long-running
+capture workers are linked to the launcher; if mitmdump or the raw UDP worker
+stops, the rest of the capture is stopped too.
 
 Use `stop` if a capture window was closed before cleanup ran.
+
+Mitmproxy local mode is intentionally not supported. It redirects the VRChat
+process directly and can disrupt live sessions. Use regular mode, wait for the
+`READY` banner, then launch VRChat.
 
 ## Output
 
@@ -116,10 +120,10 @@ seen in VRChat's own output log that did not exactly match a captured HTTP flow.
 
 ## Capture Method
 
-For a useful world recon run:
+For a useful low-disruption world run:
 
-1. Start VRChat Net Capture first.
-2. Launch VRChat after the `READY` banner.
+1. Close VRChat.
+2. Start VRChat Net Capture and wait for the `READY` banner.
 3. Enter the world fresh, preferably a new instance.
 4. Wait for the main UI/catalog to populate.
 5. Trigger search, paging, play buttons, images, and any controls that should
@@ -141,9 +145,9 @@ Common patterns:
 - Optional passive raw UDP packet evidence under `network/` when
   `--raw-udp-capture` is enabled.
 
-Use `--packet-only` for the least intrusive live-session capture. It skips
-mitmproxy, CA installation, and proxy changes, then runs only the passive raw UDP
-backend plus offline analysis.
+Packet-only mode is the default and is the least intrusive live-session capture.
+It skips mitmproxy, CA installation, and proxy changes, then runs only the
+passive raw UDP backend plus offline analysis.
 
 ## Limits
 
@@ -161,7 +165,8 @@ backend plus offline analysis.
   is written under `osc/`.
 - Certificate pinning can prevent HTTPS interception. Look for
   `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
-  and unmatched VRChat log URLs.
+  and unmatched VRChat log URLs. Prefer packet-only mode when a live VRChat
+  session must not be interrupted.
 - Sensitive HTTP headers such as authorization and cookie headers are redacted
   in JSON outputs. Native mitmproxy dump files are not written by default.
 - Unity asset bundles are detected by magic bytes and archived. With

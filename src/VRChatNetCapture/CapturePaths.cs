@@ -9,10 +9,12 @@ public sealed class CapturePaths
             ? Path.Combine(appDir, "captures")
             : Path.GetFullPath(captureRootOverride);
         RequirementsPath = Path.Combine(appDir, "requirements.txt");
-        AddonPath = Path.Combine(appDir, "capture_addon.py");
+        PythonDir = Path.Combine(appDir, "python");
+        AddonPath = Path.Combine(PythonDir, "capture_addon.py");
     }
 
     public string AppDir { get; }
+    public string PythonDir { get; }
     public string CaptureRoot { get; }
     public string RequirementsPath { get; }
     public string AddonPath { get; }

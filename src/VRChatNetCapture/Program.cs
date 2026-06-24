@@ -4,6 +4,7 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        ChildProcessTracker? childProcesses = null;
         try
         {
             if (args.Length > 0 && args[0].Equals("raw-udp-worker", StringComparison.OrdinalIgnoreCase))
@@ -14,6 +15,10 @@ public static class Program
             }
 
             var options = CaptureOptions.Parse(args);
+            if (options.Command != "stop")
+            {
+                childProcesses = ChildProcessTracker.Create();
+            }
             var paths = new CapturePaths(AppContext.BaseDirectory, options.CaptureRoot);
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, eventArgs) =>
@@ -31,6 +36,10 @@ public static class Program
         {
             Console.Error.WriteLine($"[capture] ERROR: {ex.Message}");
             return 1;
+        }
+        finally
+        {
+            childProcesses?.Dispose();
         }
     }
 }

@@ -16,14 +16,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\capture_addon.py" Link="capture_addon.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_events.py" Link="capture_events.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_osc.py" Link="capture_osc.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_photon.py" Link="capture_photon.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_records.py" Link="capture_records.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_utils.py" Link="capture_utils.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\capture_vrchat_logs.py" Link="capture_vrchat_logs.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="..\..\postprocess_raw_udp.py" Link="postprocess_raw_udp.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_addon.py" Link="python\capture_addon.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_events.py" Link="python\capture_events.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_osc.py" Link="python\capture_osc.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_photon.py" Link="python\capture_photon.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_records.py" Link="python\capture_records.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_utils.py" Link="python\capture_utils.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_vrchat_logs.py" Link="python\capture_vrchat_logs.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\postprocess_raw_udp.py" Link="python\postprocess_raw_udp.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\requirements.txt" Link="requirements.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

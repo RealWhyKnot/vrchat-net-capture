@@ -35,7 +35,7 @@ public sealed class SessionMetadata
     public bool ProxyChanged { get; set; }
 
     [JsonPropertyName("mode")]
-    public string Mode { get; set; } = "local";
+    public string Mode { get; set; } = "regular";
 
     [JsonPropertyName("packet_only")]
     public bool PacketOnly { get; set; }

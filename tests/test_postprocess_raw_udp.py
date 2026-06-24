@@ -65,7 +65,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
                     "source_address": "192.0.2.5",
                     "source_port": 50001,
                     "destination_address": "203.0.113.10",
-                    "destination_port": 5055,
+                    "destination_port": 27002,
                     "payload_sha256": "photon",
                     "payload_path": "network/payloads/photon.udp.bin",
                     "payload_length": len(photon_payload),
@@ -90,7 +90,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
             self.assertEqual(len(photon_packets), 1)
             self.assertEqual(photon_packets[0]["photon"]["capture_semantics"], "wire_copy")
             self.assertEqual(photon_packets[0]["photon"]["confidence"], "low")
-            self.assertEqual(photon_packets[0]["photon"]["ports"], [5055])
+            self.assertEqual(photon_packets[0]["photon"]["ports"], [27002])
             self.assertEqual(photon_summary["capture_semantics"], "wire_copy")
             self.assertEqual(photon_summary["capture_semantics_counts"], {"wire_copy": 1})
 
