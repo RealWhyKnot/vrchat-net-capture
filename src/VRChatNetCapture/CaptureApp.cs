@@ -39,10 +39,10 @@ public sealed class CaptureApp
             Console.Error.WriteLine("[capture] ERROR: packet-only capture requires running VRChat Net Capture as Administrator.");
             return 1;
         }
-        if (_options.Mode == "regular" && IsProcessRunning("VRChat"))
+        var vrchatAlreadyRunning = ShouldWarnAboutRunningVrChat(_options, IsProcessRunning("VRChat"));
+        if (vrchatAlreadyRunning)
         {
-            Console.Error.WriteLine("[capture] ERROR: VRChat is already running. Close VRChat, start capture, wait for READY, then launch VRChat.");
-            return 1;
+            Console.Error.WriteLine("[capture] WARN: VRChat is already running. Existing traffic may keep using old proxy settings; for full startup traffic, start capture before launching VRChat.");
         }
 
         var session = _paths.CreateSession();
@@ -175,7 +175,7 @@ public sealed class CaptureApp
                     return 1;
                 }
             }
-            PrintReady(session.CaptureDir);
+            PrintReady(session.CaptureDir, vrchatAlreadyRunning);
             return await WaitForLinkedCaptureExitAsync(mitmdump, rawUdpWorker, session, analysis).ConfigureAwait(false);
         }
         finally
@@ -853,11 +853,19 @@ public sealed class CaptureApp
         }
     }
 
-    private static void PrintReady(string captureDir)
+    internal static bool ShouldWarnAboutRunningVrChat(CaptureOptions options, bool vrchatRunning) =>
+        !options.PacketOnly && options.Mode == "regular" && vrchatRunning;
+
+    internal static string ReadyActionLine(bool vrchatAlreadyRunning) =>
+        vrchatAlreadyRunning
+            ? " READY. VRChat is already running; continue from the current session."
+            : " READY. Launch VRChat now and visit the worlds you want to study.";
+
+    private static void PrintReady(string captureDir, bool vrchatAlreadyRunning)
     {
         Console.WriteLine();
         Console.WriteLine("=================================================================");
-        Console.WriteLine(" READY. Launch VRChat now and visit the worlds you want to study.");
+        Console.WriteLine(ReadyActionLine(vrchatAlreadyRunning));
         Console.WriteLine($" Capture dir: {captureDir}");
         Console.WriteLine(" Press Ctrl+C in this window to stop and tear everything down.");
         Console.WriteLine("=================================================================");

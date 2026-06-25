@@ -7,6 +7,7 @@ var tests = new (string Name, Action Body)[]
     ("stop command parses", TestStopCommand),
     ("analysis options parse and default off", TestAnalysisOptions),
     ("local mode is rejected", TestLocalModeRejected),
+    ("running VRChat warns without blocking", TestRunningVrchatWarning),
     ("packet-only option implies raw UDP", TestPacketOnlyOptions),
     ("UDP endpoint discovery parses netstat output", TestUdpEndpointDiscovery),
     ("raw UDP worker options parse", TestRawUdpOptions),
@@ -105,6 +106,15 @@ static void TestLocalModeRejected()
 {
     Throws(() => CaptureOptions.Parse(["--mode", "local"]));
     Throws(() => CaptureOptions.Parse(["--local-target", "VRChat.exe"]));
+}
+
+static void TestRunningVrchatWarning()
+{
+    True(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse([]), vrchatRunning: true));
+    False(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse([]), vrchatRunning: false));
+    False(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse(["--packet-only"]), vrchatRunning: true));
+    True(CaptureApp.ReadyActionLine(vrchatAlreadyRunning: true).Contains("already running", StringComparison.Ordinal));
+    True(CaptureApp.ReadyActionLine(vrchatAlreadyRunning: false).Contains("Launch VRChat", StringComparison.Ordinal));
 }
 
 static void TestPacketOnlyOptions()

@@ -39,8 +39,8 @@ From the release folder:
 
 Default behavior:
 
-1. Requires VRChat to be closed.
-2. Finds Python and mitmproxy.
+1. Finds Python and mitmproxy.
+2. Warns if VRChat is already running.
 3. Stashes current proxy settings, then points Windows at local mitmdump.
 4. Asks whether to enable optional OSC, Photon metadata, and Unity metadata
    analysis. Each defaults to no.
@@ -76,8 +76,10 @@ stops, the rest of the capture is stopped too.
 Use `stop` if a capture window was closed before cleanup ran.
 
 Mitmproxy local mode is intentionally not supported. It redirects the VRChat
-process directly and can disrupt live sessions. Use regular mode, wait for the
-`READY` banner, then launch VRChat.
+process directly and can disrupt live sessions. Regular mode can start while
+VRChat is already running, but existing traffic may keep using old proxy
+settings and startup traffic is already gone. For a complete startup capture,
+wait for the `READY` banner, then launch VRChat.
 
 ## Output
 
@@ -122,7 +124,7 @@ seen in VRChat's own output log that did not exactly match a captured HTTP flow.
 
 For a useful low-disruption world run:
 
-1. Close VRChat.
+1. Close VRChat if you need startup traffic.
 2. Start VRChat Net Capture and wait for the `READY` banner.
 3. Enter the world fresh, preferably a new instance.
 4. Wait for the main UI/catalog to populate.
