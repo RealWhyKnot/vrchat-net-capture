@@ -28,6 +28,7 @@
     <None Include="..\vrchat_net_capture\capture_utils.py" Link="python\capture_utils.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_vrchat_logs.py" Link="python\capture_vrchat_logs.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\postprocess_raw_udp.py" Link="python\postprocess_raw_udp.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\vrm_codec.py" Link="python\vrm_codec.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\requirements.txt" Link="requirements.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(NuGetPackageRoot)native.windivert\2.2.2\runtimes\win-x64\native\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

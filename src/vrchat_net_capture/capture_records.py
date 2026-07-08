@@ -81,6 +81,7 @@ def build_http_record(
             resp_hash,
             resp_decoded,
             resp.headers.get("content-type") if resp else "",
+            host,
         )
         if is_unity_bundle and analyze_unity and have_unitypy:
             unitypy_summary_path = unitypy_peek(

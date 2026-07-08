@@ -7,7 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from vrm_codec import try_decode as vrm_try_decode
+
 UNITY_MAGICS = (b"UnityFS", b"UnityRaw", b"UnityWeb")
+VRM_HOSTS = {"vr-m.net", "data.vr-m.net"}
 HEX_PREVIEW_BYTES = 256
 SAFE_SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -18,6 +21,7 @@ def decode_response(
     h: str,
     body: bytes,
     content_type: str,
+    host: str = "",
 ) -> tuple[str | None, str | None, bool]:
     ctype = (content_type or "").lower()
     magic = body[:8]
@@ -27,6 +31,16 @@ def decode_response(
             hexpath = decoded_dir / f"{h}.hex"
             hexpath.write_text(hex_preview(body), encoding="utf-8")
             return (relative_artifact_path(capture_dir, hexpath), m.decode("ascii"), True)
+
+    if host in VRM_HOSTS:
+        # vr-m.net packs its catalog/session JSON; a packed body is valid UTF-8 and would
+        # otherwise misroute to the text/hex branch below. Plain vr-m bodies (root, problem+json)
+        # return None here and fall through to the JSON branch.
+        decoded = vrm_try_decode(body)
+        if decoded is not None:
+            p = decoded_dir / f"{h}.json"
+            p.write_text(json.dumps(json.loads(decoded), indent=2, ensure_ascii=False), encoding="utf-8")
+            return (relative_artifact_path(capture_dir, p), "vrm", False)
 
     if body.startswith(b"#EXTM3U") or "mpegurl" in ctype:
         p = decoded_dir / f"{h}.m3u8"
