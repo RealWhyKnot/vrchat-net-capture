@@ -52,7 +52,7 @@ jobs:
           "is_beta=$($isBeta.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
