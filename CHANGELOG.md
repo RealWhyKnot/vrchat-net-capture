@@ -4,6 +4,7 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 
 ## Unreleased
 
+- VRChat infrastructure and the local video resolver now pass through the proxy by default, so worlds download and videos play during a capture. `--mitm-ignore-hosts` now adds to that set rather than replacing it, and `--no-default-ignore-hosts` restores the old behavior.
 - Added `VRChatNetCapture.exe`, a compiled Windows launcher for start/stop capture sessions.
 - Added `build.ps1`, win-x64 publishing, release zips, manifests, and a tag-driven release workflow.
 - Removed mitmproxy local mode because redirecting the VRChat process can disrupt live sessions.

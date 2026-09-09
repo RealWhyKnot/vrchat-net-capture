@@ -133,9 +133,13 @@ public sealed class CaptureApp
             {
                 Console.WriteLine($"[capture] active mitmproxy allow-hosts regex: {_options.MitmAllowHosts}");
             }
-            if (!string.IsNullOrWhiteSpace(_options.MitmIgnoreHosts))
+            if (!string.IsNullOrWhiteSpace(_options.EffectiveMitmIgnoreHosts))
             {
-                Console.WriteLine($"[capture] active mitmproxy ignore-hosts regex: {_options.MitmIgnoreHosts}");
+                Console.WriteLine($"[capture] active mitmproxy ignore-hosts regex: {_options.EffectiveMitmIgnoreHosts}");
+            }
+            if (_options.NoDefaultIgnoreHosts)
+            {
+                Console.WriteLine("[capture] WARNING: --no-default-ignore-hosts is set; VRChat world downloads and video playback will fail.");
             }
 
             var metadata = new SessionMetadata
@@ -333,9 +337,9 @@ public sealed class CaptureApp
         {
             args.AddRange(["--allow-hosts", options.MitmAllowHosts]);
         }
-        else if (!string.IsNullOrWhiteSpace(options.MitmIgnoreHosts))
+        else if (!string.IsNullOrWhiteSpace(options.EffectiveMitmIgnoreHosts))
         {
-            args.AddRange(["--ignore-hosts", options.MitmIgnoreHosts]);
+            args.AddRange(["--ignore-hosts", options.EffectiveMitmIgnoreHosts]);
         }
         args.AddRange(
         [

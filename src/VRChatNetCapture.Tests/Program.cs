@@ -15,6 +15,7 @@ var tests = new (string Name, Action Body)[]
     ("UDP parser and PCAP writer handle IPv4 datagrams", TestUdpParserAndPcapWriter),
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
+    ("vrchat infrastructure passes through by default", TestDefaultIgnoreHosts),
 };
 
 var failures = 0;
@@ -50,6 +51,50 @@ static void TestDefaultOptions()
     False(options.PacketOnly);
     Equal("", options.MitmAllowHosts);
     Equal("", options.MitmIgnoreHosts);
+}
+
+static void TestDefaultIgnoreHosts()
+{
+    var host = new System.Text.RegularExpressions.Regex(CaptureOptions.Parse([]).EffectiveMitmIgnoreHosts);
+    foreach (var passthrough in new[]
+    {
+        "api.vrchat.cloud:443",
+        "pipeline.vrchat.cloud:443",
+        "files.vrchat.cloud:443",
+        "file-variants.vrchat.cloud:443",
+        "assets.vrchat.com:443",
+        "vrchat.com:443",
+        "localhost.youtube.com:54332",
+    })
+    {
+        True(host.IsMatch(passthrough));
+    }
+    foreach (var captured in new[]
+    {
+        "data.illumination.media:443",
+        "bh3.imvrcdn.com:443",
+        "www.youtube.com:443",
+        "notvrchat.cloud.example.com:443",
+    })
+    {
+        False(host.IsMatch(captured));
+    }
+
+    var combined = CaptureOptions.Parse(["--mitm-ignore-hosts", @"(?i)^([a-z0-9-]+\.)*example\.test:\d+$"]);
+    var merged = new System.Text.RegularExpressions.Regex(combined.EffectiveMitmIgnoreHosts);
+    True(merged.IsMatch("file-variants.vrchat.cloud:443"));
+    True(merged.IsMatch("sub.example.test:443"));
+    False(merged.IsMatch("bh3.imvrcdn.com:443"));
+
+    var opted = CaptureOptions.Parse(["--no-default-ignore-hosts"]);
+    True(opted.NoDefaultIgnoreHosts);
+    Equal("", opted.EffectiveMitmIgnoreHosts);
+
+    var root = Path.Combine(Path.GetTempPath(), "vnc-ignore-hosts");
+    var paths = new CapturePaths(root, Path.Combine(root, "captures"));
+    var session = new CaptureSession { CaptureDir = Path.Combine(root, "captures", "one") };
+    Contains(CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session), "--ignore-hosts");
+    False(CaptureApp.BuildMitmdumpArguments(opted, paths, session).Contains("--ignore-hosts"));
 }
 
 static void TestStopCommand()
@@ -248,7 +293,7 @@ static void TestMitmdumpArgs()
     Contains(defaultArgs, "--listen-port");
     Contains(defaultArgs, "8080");
     False(defaultArgs.Contains("--allow-hosts"));
-    False(defaultArgs.Contains("--ignore-hosts"));
+    Contains(defaultArgs, "--ignore-hosts");
 
     var regularOptions = CaptureOptions.Parse(["--mode", "regular", "--listen-port", "8081", "--ignore-hosts", "example.test"]);
     var regular = CaptureApp.BuildMitmdumpArguments(regularOptions, paths, session);
