@@ -1,87 +1,99 @@
 # VRChat Net Capture
 
-VRChat Net Capture is a Windows capture tool for inspecting passive UDP, OSC,
-Photon-like metadata, HTTP(S), WebSocket, TLS/connect, DNS, and VRChat
-output-log evidence from a local VRChat session. The released app is
-`VRChatNetCapture.exe`; regular system-proxy capture is the active HTTP/bundle
-mode, and packet-only capture is available for passive UDP-only sessions.
+I built this to answer one question: when a VRChat world loads something, where
+does it actually come from? Point it at a live session and it records the HTTP(S)
+traffic, WebSocket frames, TLS and DNS events, UDP datagrams, and the URLs VRChat
+writes to its own log, then leaves you a folder you can read.
 
-The tool does not upload captures anywhere. Everything is written locally under
-`captures\<timestamp>\`.
+Nothing is uploaded anywhere. Everything lands in `captures\<timestamp>\` on your
+machine.
 
-## Security
+Windows only, because it drives the Windows system proxy and the Windows
+certificate store.
 
-Active HTTP capture installs the mitmproxy CA into `Cert:\CurrentUser\Root`
-while a capture is running and points Windows' system proxy at a local mitmdump
-instance. Packet-only mode does not install a CA, run mitmproxy, or change the
-Windows system proxy.
+## Read this before you run it
 
-On stop, the app removes only the exact CA thumbprint that the current session
-installed. If that CA already existed before the session, it is left alone. Use
-`--keep-cert` if you want to keep a session-installed CA between runs.
+Active capture changes two things about your machine while it runs. It installs
+the mitmproxy CA into `Cert:\CurrentUser\Root`, and it points the Windows system
+proxy at a local mitmdump. Both are undone on a clean stop.
 
-## Requirements
+On stop the app removes only the exact certificate thumbprint it installed this
+session. If that CA was already on your machine beforehand, it's left alone.
+Pass `--keep-cert` if you'd rather hold onto a session-installed CA between runs.
 
-- Windows 10/11.
-- Python 3.11 or newer from python.org. The Microsoft Store `python.exe` stub is
-  skipped.
-- mitmproxy is required for active HTTP capture.
-- Administrator approval is required for the default passive raw UDP packet
-  capture backend.
+If a capture window gets closed before cleanup runs, your proxy is still pointed
+at a dead port and nothing will reach the internet. Fix it with:
 
-## Usage
+```powershell
+.\VRChatNetCapture.exe stop
+```
 
-From the release folder:
+Packet-only mode touches none of this. No CA, no mitmproxy, no proxy change.
+
+## What you need
+
+- Windows 10 or 11.
+- Python 3.11+ from python.org. The Microsoft Store stub is skipped deliberately,
+  it doesn't work for this.
+- mitmproxy, for active HTTP capture. The app will offer to install it.
+- Administrator, but only for `--raw-udp-capture`. Normal runs don't need it.
+
+## Running a capture
 
 ```powershell
 .\VRChatNetCapture.exe
 ```
 
-Default behavior:
+That finds Python and mitmproxy, warns you if VRChat is already running, stashes
+your proxy settings and repoints them, asks whether you want the optional OSC,
+Photon and Unity analysis (all default to no), then prints `READY`.
 
-1. Finds Python and mitmproxy.
-2. Warns if VRChat is already running.
-3. Stashes current proxy settings, then points Windows at local mitmdump.
-4. Asks whether to enable optional OSC, Photon metadata, and Unity metadata
-   analysis. Each defaults to no.
-5. Prints `READY`. Launch VRChat after that.
-6. On Ctrl+C, stops mitmdump, restores proxy settings, and removes any session-installed CA.
+**Launch VRChat after `READY`, not before.** Unity reads the system proxy once at
+startup, so a VRChat that was already running never routes through the capture
+and you'll get an empty session. Regular mode can start alongside a running
+VRChat, but you'll miss startup traffic and existing connections keep using the
+old settings.
 
-Useful options:
+Ctrl+C stops mitmdump, restores your proxy, and removes the session CA.
+
+### Hosts that are always passed through
+
+VRChat's own infrastructure (`*.vrchat.cloud`, `*.vrchat.com`) and the local video
+resolver (`localhost.youtube.com`) bypass interception on every run. This isn't
+tidiness, it's required. VRChat's asset bundle downloader validates against a CA
+bundle shipped inside the game and the local resolver serves a self-signed
+certificate, so intercepting either one breaks it: you can't travel to any world
+that isn't already cached, and videos never load.
+
+Anything you pass to `--mitm-ignore-hosts` is added to that set, never swapped
+for it. If you genuinely want to intercept VRChat's own API, `--no-default-ignore-hosts`
+turns the protection off, and the app will warn you that worlds will fail.
+
+### Options worth knowing
 
 ```powershell
-.\VRChatNetCapture.exe --mode regular
-.\VRChatNetCapture.exe --mitm-ignore-hosts "(?i)^(api\.vrchat\.cloud|pipeline\.vrchat\.cloud):443$"
 .\VRChatNetCapture.exe --listen-port 8081
+.\VRChatNetCapture.exe --mitm-ignore-hosts "(?i)^([a-z0-9-]+\.)*example\.test:\d+$"
 .\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
-.\VRChatNetCapture.exe --keep-cert
-.\VRChatNetCapture.exe --no-update-prompt
-.\VRChatNetCapture.exe --packet-only --decode-osc --photon-metadata
-.\VRChatNetCapture.exe --decode-osc
-.\VRChatNetCapture.exe --photon-metadata
-.\VRChatNetCapture.exe --unity-metadata
-.\VRChatNetCapture.exe --raw-udp-capture
-.\VRChatNetCapture.exe --raw-udp-ports 27000-27002,9000,9001
-.\VRChatNetCapture.exe --no-analysis-prompts
-.\VRChatNetCapture.exe stop
+.\VRChatNetCapture.exe --no-analysis-prompts --no-update-prompt
+.\VRChatNetCapture.exe --decode-osc --store-osc-values
+.\VRChatNetCapture.exe --packet-only --raw-udp-capture
 ```
 
-When raw UDP capture is enabled, VRChat Net Capture also adds UDP ports owned by
-the currently running `VRChat.exe` process to the capture filter. This helps
-existing sessions where VRChat has already opened dynamic local UDP ports. Raw
-UDP capture requires running VRChat Net Capture as Administrator. Long-running
-capture workers are linked to the launcher; if mitmdump or the raw UDP worker
-stops, the rest of the capture is stopped too.
+`--ignore-hosts` takes a comma-separated host list and drops those from what gets
+written. `--mitm-ignore-hosts` takes a `host:port` regex and stops them being
+intercepted at all. They're different things and it's easy to reach for the wrong
+one. `--help` lists the rest.
 
-Use `stop` if a capture window was closed before cleanup ran.
+With `--raw-udp-capture` the tool also adds UDP ports owned by the running
+`VRChat.exe` to the filter, which helps when VRChat already opened its dynamic
+ports. Capture workers are linked to the launcher, so if mitmdump or the UDP
+worker dies, the whole capture stops rather than half-running.
 
-Mitmproxy local mode is intentionally not supported. It redirects the VRChat
-process directly and can disrupt live sessions. Regular mode can start while
-VRChat is already running, but existing traffic may keep using old proxy
-settings and startup traffic is already gone. For a complete startup capture,
-wait for the `READY` banner, then launch VRChat.
+Mitmproxy's local mode is deliberately unsupported. It redirects the VRChat
+process directly and that can disrupt a live session.
 
-## Output
+## Reading a capture
 
 ```
 captures/<timestamp>/
@@ -89,22 +101,22 @@ captures/<timestamp>/
 |-- .mitmproxy-cert.json
 |-- .previous-proxy.json          # regular mode only
 |-- flows.jsonl                   # one HTTP flow per line
-|-- flows.json                    # HTTP flow array written at shutdown
+|-- flows.json                    # flow array, written at shutdown
 |-- events.jsonl                  # CONNECT/TLS/WebSocket/DNS/TCP/UDP events
-|-- events.json                   # event array written at shutdown
+|-- events.json                   # event array, written at shutdown
 |-- summary.json                  # counts by host/status/event/error
 |-- osc-events.jsonl              # optional decoded OSC datagrams
 |-- osc-summary.json              # optional OSC counts by address/type tag
-|-- photon-packets.jsonl          # optional proxy-observed Photon-like UDP metadata
+|-- photon-packets.jsonl          # optional Photon-like UDP metadata
 |-- photon-summary.json           # optional Photon-like UDP counts
-|-- network/realtime-udp.pcapng   # optional passive raw UDP packet capture
-|-- network/packet-index.jsonl    # optional passive packet index
-|-- network/udp-datagrams.jsonl   # optional UDP payload index
+|-- network/realtime-udp.pcapng   # optional passive raw UDP capture
+|-- network/packet-index.jsonl
+|-- network/udp-datagrams.jsonl
 |-- network/payloads/<sha>.udp.bin
 |-- osc/osc-events.jsonl          # optional passive OSC analysis
 |-- photon/photon-packets.jsonl   # optional passive Photon-like metadata
-|-- vrchat-log-events.jsonl       # URL-bearing VRChat log lines
-|-- vrchat-log-unmatched.jsonl    # log URLs not matched by captured HTTP flows
+|-- vrchat-log-events.jsonl       # URL-bearing lines from VRChat's log
+|-- vrchat-log-unmatched.jsonl    # log URLs with no matching captured flow
 |-- bodies/<sha256>.bin
 |-- websockets/<sha256>.ws.bin
 |-- streams/<sha256>.<tcp|udp>.bin
@@ -112,69 +124,52 @@ captures/<timestamp>/
 `-- by-host/<host>/<time>__<METHOD>__<status>__<slug>__<flowid>.json
 ```
 
-Start with `summary.json`, then inspect `by-host/`. VRChat infrastructure hosts
-such as `api.vrchat.cloud`, `assets.vrchat.com`, `files.vrchat.cloud`, and
-`pipeline.vrchat.cloud` are common. World-specific backends are usually hosts
-that do not look VRChat-affiliated.
+Start at `summary.json` for the shape of the session, then go to `by-host/`.
+VRChat's own hosts are noise for most purposes; the interesting ones are usually
+whatever doesn't look VRChat-affiliated.
 
-`vrchat-log-unmatched.jsonl` is the missed-traffic checklist: it contains URLs
-seen in VRChat's own output log that did not exactly match a captured HTTP flow.
+`vrchat-log-unmatched.jsonl` is the one to check when something feels missing. It
+lists URLs that VRChat's log says it fetched but that never showed up as a
+captured flow, which is how you spot interception that silently failed.
 
-## Capture Method
+Note that `stop` does not run the postprocess step. `summary.json`, `flows.json`
+and the log correlation are written on Ctrl+C shutdown. After a `stop` you'll have
+the raw `flows.jsonl`, `events.jsonl`, `by-host/` and `bodies/` and nothing else.
 
-For a useful low-disruption world run:
+## Getting a good world capture
 
-1. Close VRChat if you need startup traffic.
-2. Start VRChat Net Capture and wait for the `READY` banner.
-3. Enter the world fresh, preferably a new instance.
-4. Wait for the main UI/catalog to populate.
-5. Trigger search, paging, play buttons, images, and any controls that should
-   touch the network.
-6. Let playback run briefly.
-7. Quit or leave the world cleanly.
-8. Stop the capture.
+1. Close VRChat first if you want the startup traffic.
+2. Start the capture and wait for `READY`.
+3. Join the world fresh, ideally a new instance.
+4. Let the main UI or catalog finish populating.
+5. Exercise it. Search, paging, play buttons, thumbnails, anything that should hit
+   the network.
+6. Let something play for a bit.
+7. Leave the world cleanly, then stop the capture.
 
-Common patterns:
+What you usually find: one big JSON catalog plus a pile of image fetches, HLS
+playlists pointing at separate media hosts, per-search API calls, and TLS failures
+where a host refused to be intercepted.
 
-- One large JSON catalog plus many image fetches.
-- HLS playlists pointing to media segment hosts.
-- Per-search or per-page API requests.
-- WebSocket messages in `events.jsonl` plus payloads in `websockets/`.
-- TLS/connect failures where a target cannot be intercepted.
-- Optional OSC datagrams in `osc-events.jsonl` when OSC decoding is enabled.
-- Optional proxy-observed Photon-like UDP metadata in `photon-packets.jsonl`
-  when Photon metadata is enabled.
-- Optional passive raw UDP packet evidence under `network/` when
-  `--raw-udp-capture` is enabled.
+## What it won't do
 
-Packet-only mode is the default and is the least intrusive live-session capture.
-It skips mitmproxy, CA installation, and proxy changes, then runs only the
-passive raw UDP backend plus offline analysis.
+- **Photon payloads aren't decoded.** With `--photon-metadata` you get ports,
+  sizes, direction and low-confidence header shape guesses, nothing more. Records
+  under the capture root are marked `capture_semantics: "proxy_observed"`; records
+  under `network/` and `photon/` come from the passive WinDivert sidecar and use
+  `"wire_copy"` with `pid_confidence: "none"`.
+- **OSC values are redacted** unless you pass `--store-osc-values`. Decoding is
+  opt-in and reads datagrams the backend already saw. It never binds or competes
+  for VRChat's OSC ports.
+- **Certificate pinning wins.** Some hosts simply can't be intercepted. Look for
+  `tls_failure_targets` in `summary.json` and TLS errors in `events.jsonl`. If a
+  live session must not be disturbed at all, use packet-only mode.
+- **Unity bundles are archived, not extracted.** They're detected by magic bytes.
+  `--unity-metadata` adds a bounded object-type peek if UnityPy is installed.
+  Pulling out textures, meshes, audio or repacked bundles is out of scope.
 
-## Limits
-
-- Photon payload semantics are not decoded. With `--photon-metadata`,
-  observed UDP datagrams are classified only as metadata candidates with ports,
-  sizes, direction, and low-confidence header shape guesses. Records under the
-  capture root are `capture_semantics: "proxy_observed"`. Records under
-  `network/` and `photon/` come from the optional passive WinDivert sidecar and
-  use `capture_semantics: "wire_copy"` with `pid_confidence: "none"` until flow
-  PID correlation is added.
-- OSC decoding is opt-in with `--decode-osc` or the startup prompt. It decodes
-  datagrams already observed by the capture backend and redacts argument values
-  unless `--store-osc-values` is used. It does not bind or compete for VRChat's
-  OSC ports. If `--raw-udp-capture` is also enabled, offline passive OSC output
-  is written under `osc/`.
-- Certificate pinning can prevent HTTPS interception. Look for
-  `tls_failure_targets` in `summary.json`, TLS/connect errors in `events.jsonl`,
-  and unmatched VRChat log URLs. Prefer packet-only mode when a live VRChat
-  session must not be interrupted.
-- Sensitive HTTP headers such as authorization and cookie headers are redacted
-  in JSON outputs. Native mitmproxy dump files are not written by default.
-- Unity asset bundles are detected by magic bytes and archived. With
-  `--unity-metadata`, UnityPy can write a bounded object-type metadata peek when
-  it is installed. Exporting textures, meshes, audio, video, scripts, scenes, or
-  repacked bundles is out of scope.
+Authorization and cookie headers are redacted in the JSON output, and native
+mitmproxy dump files aren't written at all.
 
 ## Development
 
@@ -185,9 +180,14 @@ passive raw UDP backend plus offline analysis.
 .\build.ps1 -Package
 ```
 
-`build.ps1` writes a local daily version to `version.txt`, publishes a win-x64
-distribution into `dist/`, and can create `VRChatNetCapture-v<version>.zip`
-plus a manifest.
+`build.ps1` stamps a daily version into `version.txt`, publishes a win-x64 build
+into `dist/`, and with `-Package` produces `VRChatNetCapture-v<version>.zip` and a
+manifest. Pass `-Version` explicitly if you don't want the version bumped.
+
+The Python capture modules under `src/vrchat_net_capture` are copied into
+`dist/python/` at publish time rather than embedded, so a stale `dist/` runs old
+capture logic. Check `dist/version.txt` against `version.txt` if behaviour looks
+out of date.
 
 Releases are tag-driven:
 
@@ -196,11 +196,10 @@ git tag vYYYY.M.D.N
 git push origin vYYYY.M.D.N
 ```
 
-Release tags may also use `-beta`. Commit subjects are stamped from
-`version.txt` by the repo hook and the commit-message check rejects duplicate
-version stamps.
+Tags may use a `-beta` suffix. Commit subjects are stamped from `version.txt` by
+the repo hook, and the commit-message check rejects duplicate version stamps.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Release archives also include [NOTICE](NOTICE) for
+[GPL-3.0-or-later](LICENSE). Release archives also ship [NOTICE](NOTICE) for
 bundled and runtime third-party components.
