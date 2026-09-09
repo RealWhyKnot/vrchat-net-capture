@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Text.Json;
 
 namespace VRChatNetCapture;
@@ -21,12 +20,12 @@ public sealed class CaptureApp
     {
         if (_options.ShowHelp)
         {
-            Console.WriteLine(CaptureOptions.Usage(AppName()));
+            Console.WriteLine(CaptureOptions.Usage(ConsoleReport.AppName()));
             return 0;
         }
         if (_options.ShowVersion)
         {
-            Console.WriteLine(GetVersion());
+            Console.WriteLine(ConsoleReport.Version());
             return 0;
         }
         return _options.Command == "stop" ? Stop() : await StartAsync().ConfigureAwait(false);
@@ -39,7 +38,7 @@ public sealed class CaptureApp
             Console.Error.WriteLine("[capture] ERROR: packet-only capture requires running VRChat Net Capture as Administrator.");
             return 1;
         }
-        var vrchatAlreadyRunning = ShouldWarnAboutRunningVrChat(_options, IsProcessRunning("VRChat"));
+        var vrchatAlreadyRunning = ShouldWarnAboutRunningVrChat(_options, ProcessTools.IsRunning("VRChat"));
         if (vrchatAlreadyRunning)
         {
             Console.Error.WriteLine("[capture] WARN: VRChat is already running. Existing traffic may keep using old proxy settings; for full startup traffic, start capture before launching VRChat.");
@@ -103,10 +102,10 @@ public sealed class CaptureApp
                 Console.WriteLine($"[capture] mitmproxy version: {version}");
             }
             analysis = await AddObservedUdpPortsAsync(ResolveAnalysisOptions()).ConfigureAwait(false);
-            PrintAnalysisState(analysis);
+            ConsoleReport.AnalysisState(analysis);
             if (analysis.RawUdpCapture)
             {
-                rawUdpWorker = StartRawUdpWorker(session, analysis);
+                rawUdpWorker = RawUdpWorkerHost.Start(session, analysis, _paths.AppDir, ConsoleReport.AppName());
                 if (rawUdpWorker is null)
                 {
                     return 1;
@@ -119,7 +118,7 @@ public sealed class CaptureApp
                 _options.NoCertInstall,
                 _options.KeepCert,
                 _cancellationToken).ConfigureAwait(false);
-            PrintCertificateState(cert);
+            ConsoleReport.CertificateState(cert);
 
             if (_options.Mode == "regular")
             {
@@ -165,21 +164,21 @@ public sealed class CaptureApp
             JsonFiles.Write(session.SessionFile, metadata);
             JsonFiles.Write(session.LatestPointer, metadata);
 
-            var args = BuildMitmdumpArguments(_options, _paths, session, analysis);
+            var args = MitmdumpProcess.BuildArguments(_options, _paths, session, analysis);
             Console.WriteLine("[capture] launching mitmdump...");
             mitmdump = ProcessTools.StartInteractive(mitmdumpPath, args, _paths.AppDir);
             File.WriteAllText(session.PidFile, mitmdump.Id.ToString());
 
             if (_options.Mode == "regular")
             {
-                if (!await WaitForTcpPortAsync(_options.ListenPort, mitmdump, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
+                if (!await MitmdumpProcess.WaitForListenerAsync(_options.ListenPort, mitmdump, TimeSpan.FromSeconds(10)).ConfigureAwait(false))
                 {
                     Console.Error.WriteLine($"[capture] ERROR: mitmdump did not bind 127.0.0.1:{_options.ListenPort} within 10s.");
-                    TryKill(mitmdump);
+                    ProcessTools.TryKill(mitmdump);
                     return 1;
                 }
             }
-            PrintReady(session.CaptureDir, vrchatAlreadyRunning);
+            ConsoleReport.Ready(session.CaptureDir, vrchatAlreadyRunning);
             return await WaitForLinkedCaptureExitAsync(mitmdump, rawUdpWorker, session, analysis).ConfigureAwait(false);
         }
         finally
@@ -187,15 +186,15 @@ public sealed class CaptureApp
             if (mitmdump is not null && !mitmdump.HasExited)
             {
                 Console.WriteLine($"[capture] stopping mitmdump (pid {mitmdump.Id})...");
-                TryKill(mitmdump);
+                ProcessTools.TryKill(mitmdump);
             }
             if (rawUdpWorker is not null)
             {
-                StopRawUdpWorker(rawUdpWorker, session.CaptureDir, analysis);
+                RawUdpWorkerHost.Stop(rawUdpWorker, session.CaptureDir, analysis);
             }
             if (analysis?.RawUdpCapture == true && pythonForPostprocess is not null)
             {
-                RunRawUdpPostprocess(pythonForPostprocess, session.CaptureDir, analysis);
+                RawUdpWorkerHost.RunPostprocess(pythonForPostprocess, session.CaptureDir, analysis);
             }
             CleanupSession(session.CaptureDir, session.CaptureRoot, proxyChanged);
             Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
@@ -224,8 +223,8 @@ public sealed class CaptureApp
             }
 
             analysis = await AddObservedUdpPortsAsync(ResolveAnalysisOptions(forceRawUdp: true)).ConfigureAwait(false);
-            PrintAnalysisState(analysis);
-            rawUdpWorker = StartRawUdpWorker(session, analysis);
+            ConsoleReport.AnalysisState(analysis);
+            rawUdpWorker = RawUdpWorkerHost.Start(session, analysis, _paths.AppDir, ConsoleReport.AppName());
             if (rawUdpWorker is null)
             {
                 Console.Error.WriteLine("[capture] ERROR: passive raw UDP capture did not start.");
@@ -272,11 +271,11 @@ public sealed class CaptureApp
         {
             if (rawUdpWorker is not null)
             {
-                StopRawUdpWorker(rawUdpWorker, session.CaptureDir, analysis);
+                RawUdpWorkerHost.Stop(rawUdpWorker, session.CaptureDir, analysis);
             }
             if (analysis?.RawUdpCapture == true && pythonForPostprocess is not null)
             {
-                RunRawUdpPostprocess(pythonForPostprocess, session.CaptureDir, analysis);
+                RawUdpWorkerHost.RunPostprocess(pythonForPostprocess, session.CaptureDir, analysis);
             }
             CleanupSession(session.CaptureDir, session.CaptureRoot, proxyChanged: false);
             Console.WriteLine($"[capture] session dir: {session.CaptureDir}");
@@ -299,9 +298,9 @@ public sealed class CaptureApp
         else
         {
             Console.WriteLine($"[capture] cleaning up {sessionDir}");
-            StopMitmdumpForSession(sessionDir);
+            MitmdumpProcess.StopForSession(sessionDir);
             var metadata = JsonFiles.Read<SessionMetadata>(Path.Combine(sessionDir, ".session.json"));
-            StopRawUdpWorkerForSession(
+            RawUdpWorkerHost.StopForSession(
                 sessionDir,
                 metadata is null
                     ? null
@@ -312,67 +311,10 @@ public sealed class CaptureApp
                     });
             CleanupSession(sessionDir, _paths.CaptureRoot, metadata?.ProxyChanged ?? File.Exists(Path.Combine(sessionDir, ".previous-proxy.json")));
         }
-        StopRawUdpWorkersForAllSessions(_paths.CaptureRoot);
-        StopStrayMitmdumpProcesses();
+        RawUdpWorkerHost.StopForAllSessions(_paths.CaptureRoot);
+        MitmdumpProcess.StopStrayProcesses();
         Console.WriteLine("[capture] done.");
         return 0;
-    }
-
-    public static IReadOnlyList<string> BuildMitmdumpArguments(
-        CaptureOptions options,
-        CapturePaths paths,
-        CaptureSession session,
-        AnalysisOptions? analysis = null)
-    {
-        analysis ??= new AnalysisOptions
-        {
-            DecodeOsc = options.DecodeOsc ?? false,
-            StoreOscValues = options.StoreOscValues,
-            PhotonMetadata = options.PhotonMetadata ?? false,
-            UnityMetadata = options.UnityMetadata ?? false,
-        };
-        var args = new List<string>();
-        args.AddRange(["--mode", "regular", "--listen-host", "127.0.0.1", "--listen-port", options.ListenPort.ToString()]);
-        if (!string.IsNullOrWhiteSpace(options.MitmAllowHosts))
-        {
-            args.AddRange(["--allow-hosts", options.MitmAllowHosts]);
-        }
-        else if (!string.IsNullOrWhiteSpace(options.EffectiveMitmIgnoreHosts))
-        {
-            args.AddRange(["--ignore-hosts", options.EffectiveMitmIgnoreHosts]);
-        }
-        args.AddRange(
-        [
-            "-s",
-            paths.AddonPath,
-            "--set",
-            $"capture_dir={session.CaptureDir}",
-            "--set",
-            $"ignore_hosts_list={options.IgnoreHosts}",
-            "--set",
-            $"decode_osc={BoolString(analysis.DecodeOsc)}",
-            "--set",
-            $"store_osc_values={BoolString(analysis.StoreOscValues)}",
-            "--set",
-            $"photon_metadata={BoolString(analysis.PhotonMetadata)}",
-            "--set",
-            $"unity_metadata={BoolString(analysis.UnityMetadata)}",
-            "--set",
-            "flow_detail=0",
-        ]);
-        return args;
-    }
-
-    public static bool IsProcessRunning(string processName)
-    {
-        try
-        {
-            return Process.GetProcessesByName(processName).Length > 0;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private AnalysisOptions ResolveAnalysisOptions(bool forceRawUdp = false)
@@ -530,61 +472,6 @@ public sealed class CaptureApp
         }
     }
 
-    private Process? StartRawUdpWorker(CaptureSession session, AnalysisOptions analysis)
-    {
-        if (!ProcessTools.IsAdministrator())
-        {
-            Console.Error.WriteLine("[capture] ERROR: passive raw UDP capture requires running VRChat Net Capture as Administrator.");
-            return null;
-        }
-
-        var exe = Environment.ProcessPath ?? AppName();
-        var stopFile = Path.Combine(session.CaptureDir, ".raw-udp.stop");
-        if (File.Exists(stopFile))
-        {
-            File.Delete(stopFile);
-        }
-        var args = BuildRawUdpWorkerArguments(session, analysis, Environment.ProcessId);
-        try
-        {
-            Console.WriteLine($"[capture] starting passive raw UDP capture for ports: {analysis.RawUdpPorts}");
-            var process = ProcessTools.StartBackground(exe, args, _paths.AppDir);
-            File.WriteAllText(Path.Combine(session.CaptureDir, ".raw-udp.pid"), process.Id.ToString());
-            Thread.Sleep(1500);
-            if (process.HasExited)
-            {
-                Console.Error.WriteLine($"[capture] ERROR: raw UDP capture worker exited early with code {process.ExitCode}.");
-                return null;
-            }
-            Console.WriteLine($"[capture] raw UDP worker pid={process.Id}");
-            return process;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[capture] WARN: raw UDP capture did not start: {ex.Message}");
-            return null;
-        }
-    }
-
-    public static IReadOnlyList<string> BuildRawUdpWorkerArguments(
-        CaptureSession session,
-        AnalysisOptions analysis,
-        int parentPid)
-    {
-        return
-        [
-            "raw-udp-worker",
-            "--capture-dir",
-            session.CaptureDir,
-            "--ports",
-            analysis.RawUdpPorts,
-            "--stop-file",
-            Path.Combine(session.CaptureDir, ".raw-udp.stop"),
-            "--parent-pid",
-            parentPid.ToString(),
-        ];
-    }
-
     private async Task<int> WaitForLinkedCaptureExitAsync(
         Process mitmdump,
         Process? rawUdpWorker,
@@ -615,7 +502,7 @@ public sealed class CaptureApp
             if (!mitmdump.HasExited)
             {
                 Console.WriteLine($"[capture] stopping mitmdump (pid {mitmdump.Id}) after raw UDP worker exit...");
-                TryKill(mitmdump);
+                ProcessTools.TryKill(mitmdump);
             }
             return rawUdpWorker.ExitCode == 0 ? 0 : rawUdpWorker.ExitCode;
         }
@@ -624,156 +511,9 @@ public sealed class CaptureApp
         Console.WriteLine($"[capture] mitmdump exited (code {mitmdump.ExitCode}).");
         if (!rawUdpWorker.HasExited)
         {
-            StopRawUdpWorker(rawUdpWorker, session.CaptureDir, analysis);
+            RawUdpWorkerHost.Stop(rawUdpWorker, session.CaptureDir, analysis);
         }
         return mitmdump.ExitCode;
-    }
-
-    private static void StopRawUdpWorkerForSession(string sessionDir, AnalysisOptions? analysis)
-    {
-        var pidPath = Path.Combine(sessionDir, ".raw-udp.pid");
-        if (!File.Exists(pidPath))
-        {
-            return;
-        }
-        if (!int.TryParse(File.ReadAllText(pidPath).Trim(), out var pid))
-        {
-            return;
-        }
-        try
-        {
-            var process = Process.GetProcessById(pid);
-            StopRawUdpWorker(process, sessionDir, analysis);
-        }
-        catch
-        {
-        }
-    }
-
-    private static void StopRawUdpWorkersForAllSessions(string captureRoot)
-    {
-        if (!Directory.Exists(captureRoot))
-        {
-            return;
-        }
-
-        foreach (var sessionDir in Directory.EnumerateDirectories(captureRoot))
-        {
-            var metadata = JsonFiles.Read<SessionMetadata>(Path.Combine(sessionDir, ".session.json"));
-            StopRawUdpWorkerForSession(
-                sessionDir,
-                metadata is null
-                    ? null
-                    : new AnalysisOptions
-                    {
-                        RawUdpCapture = metadata.RawUdpCapture,
-                        RawUdpPorts = metadata.RawUdpPorts,
-                    });
-        }
-    }
-
-    private static void StopRawUdpWorker(Process process, string sessionDir, AnalysisOptions? analysis)
-    {
-        if (process.HasExited)
-        {
-            return;
-        }
-        Console.WriteLine($"[capture] stopping raw UDP worker (pid {process.Id})...");
-        var stopFile = Path.Combine(sessionDir, ".raw-udp.stop");
-        File.WriteAllText(stopFile, DateTimeOffset.UtcNow.ToString("O"));
-        WakeRawUdpWorker(analysis);
-        try
-        {
-            if (!process.WaitForExit(5000))
-            {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[capture] WARN: raw UDP worker stop failed: {ex.Message}");
-        }
-    }
-
-    private static void WakeRawUdpWorker(AnalysisOptions? analysis)
-    {
-        var port = 9001;
-        try
-        {
-            var ports = RawUdpCaptureOptions.ParsePorts(analysis?.RawUdpPorts ?? "");
-            port = ports.Contains(9001) ? 9001 : ports[0];
-        }
-        catch
-        {
-        }
-        try
-        {
-            using var udp = new System.Net.Sockets.UdpClient();
-            udp.Send([0], 1, "127.0.0.1", port);
-        }
-        catch
-        {
-        }
-    }
-
-    private static void RunRawUdpPostprocess(PythonCommand python, string captureDir, AnalysisOptions analysis)
-    {
-        var script = Path.Combine(AppContext.BaseDirectory, "python", "postprocess_raw_udp.py");
-        if (!File.Exists(script))
-        {
-            return;
-        }
-        var args = new List<string>
-        {
-            script,
-            "--capture-dir",
-            captureDir,
-        };
-        if (analysis.DecodeOsc)
-        {
-            args.Add("--decode-osc");
-        }
-        if (analysis.StoreOscValues)
-        {
-            args.Add("--store-osc-values");
-        }
-        if (analysis.PhotonMetadata)
-        {
-            args.Add("--photon-metadata");
-        }
-        try
-        {
-            Console.WriteLine("[capture] running raw UDP postprocess...");
-            var result = PythonResolver.RunPythonAsync(python, args, CancellationToken.None).GetAwaiter().GetResult();
-            if (result != 0)
-            {
-                Console.Error.WriteLine("[capture] WARN: raw UDP postprocess failed.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[capture] WARN: raw UDP postprocess failed: {ex.Message}");
-        }
-    }
-
-    private static async Task<bool> WaitForTcpPortAsync(int port, Process process, TimeSpan timeout)
-    {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline && !process.HasExited)
-        {
-            try
-            {
-                using var client = new System.Net.Sockets.TcpClient();
-                await client.ConnectAsync("127.0.0.1", port).ConfigureAwait(false);
-                return true;
-            }
-            catch
-            {
-                await Task.Delay(250).ConfigureAwait(false);
-            }
-        }
-        return false;
     }
 
     private static string? FindLatestSession(string captureRoot, string latestPointer)
@@ -789,115 +529,6 @@ public sealed class CaptureApp
             .FirstOrDefault();
     }
 
-    private static void StopMitmdumpForSession(string sessionDir)
-    {
-        var pidFile = Path.Combine(sessionDir, ".mitmdump.pid");
-        if (!File.Exists(pidFile))
-        {
-            return;
-        }
-        if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid))
-        {
-            return;
-        }
-        try
-        {
-            var process = Process.GetProcessById(pid);
-            Console.WriteLine($"[capture] killing mitmdump pid={pid}");
-            process.Kill(entireProcessTree: true);
-        }
-        catch
-        {
-        }
-    }
-
-    private static void StopStrayMitmdumpProcesses()
-    {
-        foreach (var process in Process.GetProcessesByName("mitmdump"))
-        {
-            try
-            {
-                Console.WriteLine($"[capture] killing stray mitmdump pid={process.Id}");
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-        }
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
-            }
-        }
-        catch
-        {
-        }
-    }
-
-    private static void PrintCertificateState(CertificateMetadata cert)
-    {
-        if (!string.IsNullOrWhiteSpace(cert.Error))
-        {
-            Console.Error.WriteLine($"[capture] WARN: {cert.Error}");
-        }
-        else if (cert.InstalledBySession)
-        {
-            Console.WriteLine($"[capture] CA installed for current user: {cert.Thumbprint}");
-        }
-        else if (cert.ExistedBefore)
-        {
-            Console.WriteLine($"[capture] CA already trusted for current user: {cert.Thumbprint}");
-        }
-    }
-
     internal static bool ShouldWarnAboutRunningVrChat(CaptureOptions options, bool vrchatRunning) =>
         !options.PacketOnly && options.Mode == "regular" && vrchatRunning;
-
-    internal static string ReadyActionLine(bool vrchatAlreadyRunning) =>
-        vrchatAlreadyRunning
-            ? " READY. VRChat is already running; continue from the current session."
-            : " READY. Launch VRChat now and visit the worlds you want to study.";
-
-    private static void PrintReady(string captureDir, bool vrchatAlreadyRunning)
-    {
-        Console.WriteLine();
-        Console.WriteLine("=================================================================");
-        Console.WriteLine(ReadyActionLine(vrchatAlreadyRunning));
-        Console.WriteLine($" Capture dir: {captureDir}");
-        Console.WriteLine(" Press Ctrl+C in this window to stop and tear everything down.");
-        Console.WriteLine("=================================================================");
-        Console.WriteLine();
-    }
-
-    private static string AppName() => Path.GetFileName(Environment.ProcessPath) ?? "VRChatNetCapture";
-
-    private static string BoolString(bool value) => value ? "true" : "false";
-
-    private static void PrintAnalysisState(AnalysisOptions analysis)
-    {
-        Console.WriteLine(
-            "[capture] optional analysis: " +
-            $"osc={(analysis.DecodeOsc ? "on" : "off")}, " +
-            $"osc_values={(analysis.StoreOscValues ? "on" : "off")}, " +
-            $"photon_metadata={(analysis.PhotonMetadata ? "on" : "off")}, " +
-            $"unity_metadata={(analysis.UnityMetadata ? "on" : "off")}, " +
-            $"raw_udp={(analysis.RawUdpCapture ? "on" : "off")}");
-    }
-
-    private static string GetVersion()
-    {
-        var versionPath = Path.Combine(AppContext.BaseDirectory, "version.txt");
-        if (File.Exists(versionPath))
-        {
-            return File.ReadAllText(versionPath).Trim();
-        }
-        return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-    }
 }

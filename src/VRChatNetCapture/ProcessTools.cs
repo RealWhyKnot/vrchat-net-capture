@@ -104,6 +104,18 @@ public static class ProcessTools
         return process;
     }
 
+    public static bool IsRunning(string processName)
+    {
+        try
+        {
+            return Process.GetProcessesByName(processName).Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool IsAdministrator()
     {
         if (!OperatingSystem.IsWindows())
@@ -155,7 +167,7 @@ public static class ProcessTools
         }
     }
 
-    private static void TryKill(Process process)
+    public static void TryKill(Process process)
     {
         try
         {

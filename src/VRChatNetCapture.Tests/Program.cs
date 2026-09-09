@@ -93,8 +93,8 @@ static void TestDefaultIgnoreHosts()
     var root = Path.Combine(Path.GetTempPath(), "vnc-ignore-hosts");
     var paths = new CapturePaths(root, Path.Combine(root, "captures"));
     var session = new CaptureSession { CaptureDir = Path.Combine(root, "captures", "one") };
-    Contains(CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session), "--ignore-hosts");
-    False(CaptureApp.BuildMitmdumpArguments(opted, paths, session).Contains("--ignore-hosts"));
+    Contains(MitmdumpProcess.BuildArguments(CaptureOptions.Parse([]), paths, session), "--ignore-hosts");
+    False(MitmdumpProcess.BuildArguments(opted, paths, session).Contains("--ignore-hosts"));
 }
 
 static void TestStopCommand()
@@ -158,8 +158,8 @@ static void TestRunningVrchatWarning()
     True(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse([]), vrchatRunning: true));
     False(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse([]), vrchatRunning: false));
     False(CaptureApp.ShouldWarnAboutRunningVrChat(CaptureOptions.Parse(["--packet-only"]), vrchatRunning: true));
-    True(CaptureApp.ReadyActionLine(vrchatAlreadyRunning: true).Contains("already running", StringComparison.Ordinal));
-    True(CaptureApp.ReadyActionLine(vrchatAlreadyRunning: false).Contains("Launch VRChat", StringComparison.Ordinal));
+    True(ConsoleReport.ReadyActionLine(vrchatAlreadyRunning: true).Contains("already running", StringComparison.Ordinal));
+    True(ConsoleReport.ReadyActionLine(vrchatAlreadyRunning: false).Contains("Launch VRChat", StringComparison.Ordinal));
 }
 
 static void TestPacketOnlyOptions()
@@ -207,7 +207,7 @@ static void TestRawUdpWorkerArgs()
     {
         RawUdpPorts = "27002,9000-9001",
     };
-    var args = CaptureApp.BuildRawUdpWorkerArguments(session, analysis, 1234);
+    var args = RawUdpWorkerHost.BuildArguments(session, analysis, 1234);
     Contains(args, "raw-udp-worker");
     Contains(args, "--parent-pid");
     Contains(args, "1234");
@@ -288,7 +288,7 @@ static void TestMitmdumpArgs()
     {
         CaptureDir = Path.Combine(root, "captures", "one"),
     };
-    var defaultArgs = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session);
+    var defaultArgs = MitmdumpProcess.BuildArguments(CaptureOptions.Parse([]), paths, session);
     Contains(defaultArgs, "regular");
     Contains(defaultArgs, "--listen-port");
     Contains(defaultArgs, "8080");
@@ -296,7 +296,7 @@ static void TestMitmdumpArgs()
     Contains(defaultArgs, "--ignore-hosts");
 
     var regularOptions = CaptureOptions.Parse(["--mode", "regular", "--listen-port", "8081", "--ignore-hosts", "example.test"]);
-    var regular = CaptureApp.BuildMitmdumpArguments(regularOptions, paths, session);
+    var regular = MitmdumpProcess.BuildArguments(regularOptions, paths, session);
     Contains(regular, "regular");
     Contains(regular, "8081");
     Contains(regular, "ignore_hosts_list=example.test");
@@ -309,7 +309,7 @@ static void TestMitmdumpArgs()
         PhotonMetadata = true,
         UnityMetadata = true,
     };
-    var analysisArgs = CaptureApp.BuildMitmdumpArguments(CaptureOptions.Parse([]), paths, session, analysis);
+    var analysisArgs = MitmdumpProcess.BuildArguments(CaptureOptions.Parse([]), paths, session, analysis);
     Contains(analysisArgs, "decode_osc=true");
     Contains(analysisArgs, "store_osc_values=false");
     Contains(analysisArgs, "photon_metadata=true");
