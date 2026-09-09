@@ -99,17 +99,17 @@ jobs:
           $zipName = '${{ steps.zip.outputs.name }}'
           $zipSha = '${{ steps.zip.outputs.sha256 }}'
           $integrityName = $zipName -replace '\.zip$', '.integrity.tsv'
-          $body = @(
+          $body = (@(
             "## Changes",
-            "",
-            $subjects,
+            ""
+          ) + $subjects + @(
             "",
             "## Downloads",
             "",
             "- $zipName",
             "- SHA256: $zipSha",
             "- Integrity details are attached as $integrityName."
-          ) -join "`n"
+          )) -join "`n"
           $path = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           [System.IO.File]::WriteAllText($path, $body, [System.Text.UTF8Encoding]::new($false))
           "path=$path" >> $env:GITHUB_OUTPUT
