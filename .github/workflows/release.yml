@@ -29,27 +29,9 @@ jobs:
 
       - name: Resolve release tag
         id: release_tag
-        shell: pwsh
-        run: |
-          $tag = '${{ github.event.inputs.tag }}'
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            $tag = '${{ github.ref_name }}'
-          }
-          if ($tag -notmatch '^v\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?$') {
-            throw "tag '$tag' does not match vYYYY.M.D.N, vYYYY.M.D.N-XXXX, or vYYYY.M.D.N-beta."
-          }
-          git rev-parse --verify --quiet "refs/tags/$tag^{commit}" *> $null
-          if ($LASTEXITCODE -ne 0) {
-            throw "tag '$tag' does not exist in the checked-out repository."
-          }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-
-      - name: Detect beta tag
-        id: beta
-        shell: pwsh
-        run: |
-          $isBeta = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-beta$'
-          "is_beta=$($isBeta.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+        uses: RealWhyKnot/workflows/resolve-tag@v1
+        with:
+          tag: ${{ github.event.inputs.tag }}
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -133,10 +115,11 @@ jobs:
           "path=$path" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
-        run: |
-          $extra = @()
-          if ('${{ steps.beta.outputs.is_beta }}' -eq 'true') { $extra = @('--prerelease','--latest=false') }
-          gh release create '${{ steps.release_tag.outputs.tag }}' '${{ steps.zip.outputs.path }}' '${{ steps.zip.outputs.integrity }}' --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.path }}' @extra
+        uses: RealWhyKnot/workflows/publish-release@v1
+        with:
+          tag: ${{ steps.release_tag.outputs.tag }}
+          notes-file: ${{ steps.notes.outputs.path }}
+          prerelease: ${{ steps.release_tag.outputs.prerelease }}
+          assets: |
+            ${{ steps.zip.outputs.path }}
+            ${{ steps.zip.outputs.integrity }}
