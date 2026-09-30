@@ -9,7 +9,7 @@
 - [ ] Run the documented capture script or Python checks before opening a PR.
 - [ ] Updated README or CHANGELOG if behavior/setup changed.
 - [ ] Added or updated tests where the change is risky or user-facing.
-- [ ] No unrelated formatting, generated files, or local-only output included.
+- [ ] No unrelated formatting, build output, or local-only output included.
 
 ## Notes
 

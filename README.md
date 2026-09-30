@@ -48,7 +48,7 @@ That finds Python and mitmproxy, warns you if VRChat is already running, stashes
 your proxy settings and repoints them, asks whether you want the optional OSC,
 Photon and Unity analysis (all default to no), then prints `READY`.
 
-**Launch VRChat after `READY`, not before.** Unity reads the system proxy once at
+Launch VRChat after `READY`, not before. Unity reads the system proxy once at
 startup, so a VRChat that was already running never routes through the capture
 and you'll get an empty session. Regular mode can start alongside a running
 VRChat, but you'll miss startup traffic and existing connections keep using the
@@ -59,11 +59,11 @@ Ctrl+C stops mitmdump, restores your proxy, and removes the session CA.
 ### Hosts that are always passed through
 
 VRChat's own infrastructure (`*.vrchat.cloud`, `*.vrchat.com`) and the local video
-resolver (`localhost.youtube.com`) bypass interception on every run. This isn't
-tidiness, it's required. VRChat's asset bundle downloader validates against a CA
-bundle shipped inside the game and the local resolver serves a self-signed
-certificate, so intercepting either one breaks it: you can't travel to any world
-that isn't already cached, and videos never load.
+resolver (`localhost.youtube.com`) bypass interception on every run, because
+intercepting them breaks things. VRChat's asset bundle downloader validates
+against a CA bundle shipped inside the game and the local resolver serves a
+self-signed certificate, so you can't travel to any world that isn't already
+cached, and videos never load.
 
 Anything you pass to `--mitm-ignore-hosts` is added to that set, never swapped
 for it. If you genuinely want to intercept VRChat's own API, `--no-default-ignore-hosts`
@@ -153,18 +153,18 @@ where a host refused to be intercepted.
 
 ## What it won't do
 
-- **Photon payloads aren't decoded.** With `--photon-metadata` you get ports,
+- Photon payloads aren't decoded. With `--photon-metadata` you get ports,
   sizes, direction and low-confidence header shape guesses, nothing more. Records
   under the capture root are marked `capture_semantics: "proxy_observed"`; records
   under `network/` and `photon/` come from the passive WinDivert sidecar and use
   `"wire_copy"` with `pid_confidence: "none"`.
-- **OSC values are redacted** unless you pass `--store-osc-values`. Decoding is
+- OSC values are redacted unless you pass `--store-osc-values`. Decoding is
   opt-in and reads datagrams the backend already saw. It never binds or competes
   for VRChat's OSC ports.
-- **Certificate pinning wins.** Some hosts simply can't be intercepted. Look for
+- Certificate pinning wins. Some hosts simply can't be intercepted. Look for
   `tls_failure_targets` in `summary.json` and TLS errors in `events.jsonl`. If a
   live session must not be disturbed at all, use packet-only mode.
-- **Unity bundles are archived, not extracted.** They're detected by magic bytes.
+- Unity bundles are archived, not extracted. They're detected by magic bytes.
   `--unity-metadata` adds a bounded object-type peek if UnityPy is installed.
   Pulling out textures, meshes, audio or repacked bundles is out of scope.
 
