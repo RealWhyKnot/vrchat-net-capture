@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from capture_records import REDACTED
 from capture_vrchat_logs import mark_unmatched_log_urls, newest_output_log, parse_vrchat_log
 
 
@@ -28,6 +29,32 @@ class VrchatLogTests(unittest.TestCase):
         self.assertEqual(events[0]["category"], "string_download")
         self.assertEqual(events[0]["url"], "https://example.test/catalog.json")
         self.assertEqual(events[1]["category"], "video_playback")
+
+    def test_parse_redacts_token_query_params(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
+            path.write_text(
+                "[String Download] Attempting to load String from URL "
+                "'https://worlds.example.test/do_auth?token=secret-token&id=7'\n",
+                encoding="utf-8",
+            )
+
+            events = parse_vrchat_log(path)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["url"], f"https://worlds.example.test/do_auth?token={REDACTED}&id=7")
+        self.assertNotIn("secret-token", events[0]["line"])
+        self.assertIn(f"do_auth?token={REDACTED}&id=7'", events[0]["line"])
+
+    def test_parse_keeps_punctuation_after_redacted_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
+            path.write_text("Loaded (https://cdn.example.test/v?sig=1&auth=secret-token).\n", encoding="utf-8")
+
+            events = parse_vrchat_log(path)
+
+        self.assertEqual(events[0]["url"], f"https://cdn.example.test/v?sig=1&auth={REDACTED}")
+        self.assertEqual(events[0]["line"], f"Loaded (https://cdn.example.test/v?sig=1&auth={REDACTED}).")
 
     def test_mark_unmatched_urls(self) -> None:
         events = [

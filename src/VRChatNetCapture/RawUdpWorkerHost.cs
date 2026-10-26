@@ -30,7 +30,7 @@ public static class RawUdpWorkerHost
         {
             Console.WriteLine($"[capture] starting passive raw UDP capture for ports: {analysis.RawUdpPorts}");
             var process = ProcessTools.StartBackground(exe, args, appDir);
-            File.WriteAllText(Path.Combine(session.CaptureDir, PidFileName), process.Id.ToString());
+            ProcessTools.WritePidFile(Path.Combine(session.CaptureDir, PidFileName), process);
             Thread.Sleep(1500);
             if (process.HasExited)
             {
@@ -84,14 +84,14 @@ public static class RawUdpWorkerHost
 
     public static void StopForSession(string sessionDir, AnalysisOptions? analysis)
     {
-        var pidPath = Path.Combine(sessionDir, PidFileName);
-        if (!File.Exists(pidPath) || !int.TryParse(File.ReadAllText(pidPath).Trim(), out var pid))
+        using var process = ProcessTools.OpenRecordedProcess(Path.Combine(sessionDir, PidFileName));
+        if (process is null)
         {
             return;
         }
         try
         {
-            Stop(Process.GetProcessById(pid), sessionDir, analysis);
+            Stop(process, sessionDir, analysis);
         }
         catch
         {

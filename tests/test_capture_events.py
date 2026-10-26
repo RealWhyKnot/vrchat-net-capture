@@ -2,11 +2,57 @@ from __future__ import annotations
 
 import unittest
 
-from capture_events import build_summary, stream_event, websocket_event
+from capture_events import (
+    build_summary,
+    request_headers_event,
+    response_headers_event,
+    stream_event,
+    websocket_event,
+)
+from capture_records import REDACTED
 
 
 class Dummy:
     pass
+
+
+class Headers:
+    def __init__(self, items: list[tuple[str, str]]) -> None:
+        self._items = items
+
+    def items(self) -> list[tuple[str, str]]:
+        return list(self._items)
+
+
+def make_http_flow():
+    flow = Dummy()
+    flow.id = "flow-2"
+    flow.client_conn = None
+    flow.server_conn = None
+
+    req = Dummy()
+    req.pretty_host = "worlds.example.test"
+    req.pretty_url = "https://worlds.example.test/do_auth?authToken=secret-token&lang=en"
+    req.method = "GET"
+    req.path = "/do_auth?authToken=secret-token&lang=en"
+    req.scheme = "https"
+    req.http_version = "HTTP/1.1"
+    req.headers = Headers(
+        [
+            ("Authorization", "Bearer secret"),
+            ("Cookie", "auth=secret"),
+            ("X-Auth-Token", "secret"),
+            ("Accept", "application/json"),
+        ]
+    )
+    flow.request = req
+
+    resp = Dummy()
+    resp.status_code = 200
+    resp.http_version = "HTTP/1.1"
+    resp.headers = Headers([("Set-Cookie", "auth=secret; Path=/"), ("Content-Type", "application/json")])
+    flow.response = resp
+    return flow
 
 
 def make_flow(message: bytes = b"hello", from_client: bool = True, is_text: bool = True):
@@ -54,6 +100,28 @@ class CaptureEventsTests(unittest.TestCase):
         self.assertEqual(payload, b"\x00\x01\x02")
         self.assertEqual(event["preview"]["encoding"], "base64")
         self.assertEqual(event["capture_semantics"], "proxy_observed")
+
+    def test_request_headers_event_redacts_credentials(self) -> None:
+        event = request_headers_event(make_http_flow())
+
+        self.assertEqual(event["headers"]["Authorization"], REDACTED)
+        self.assertEqual(event["headers"]["Cookie"], REDACTED)
+        self.assertEqual(event["headers"]["X-Auth-Token"], REDACTED)
+        self.assertEqual(event["headers"]["Accept"], "application/json")
+        self.assertNotIn("secret", str(event))
+
+    def test_response_headers_event_redacts_set_cookie(self) -> None:
+        event = response_headers_event(make_http_flow())
+
+        self.assertEqual(event["headers"]["Set-Cookie"], REDACTED)
+        self.assertEqual(event["headers"]["Content-Type"], "application/json")
+        self.assertNotIn("secret", str(event))
+
+    def test_flow_events_redact_token_query_params(self) -> None:
+        event = request_headers_event(make_http_flow())
+
+        self.assertEqual(event["url"], f"https://worlds.example.test/do_auth?authToken={REDACTED}&lang=en")
+        self.assertEqual(event["path"], f"/do_auth?authToken={REDACTED}&lang=en")
 
     def test_build_summary_counts_flows_and_events(self) -> None:
         summary = build_summary(

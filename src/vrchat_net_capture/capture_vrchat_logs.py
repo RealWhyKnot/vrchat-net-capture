@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from capture_records import redact_url
+
 URL_RE = re.compile(r"https?://[^\s'\"<>]+")
 
 
@@ -40,8 +42,8 @@ def parse_vrchat_log(path: Path) -> list[dict[str, Any]]:
                         "kind": "vrchat_log_url",
                         "line_number": line_number,
                         "category": category,
-                        "url": trim_url(url),
-                        "line": line.rstrip("\r\n"),
+                        "url": redact_url(trim_url(url)),
+                        "line": redact_line(line.rstrip("\r\n")),
                     }
                 )
     return events
@@ -69,6 +71,15 @@ def mark_unmatched_log_urls(events: list[dict[str, Any]], flow_records: list[dic
         if not matched:
             unmatched.append(event)
     return unmatched
+
+
+def redact_line(line: str) -> str:
+    return URL_RE.sub(redact_url_match, line)
+
+
+def redact_url_match(match: re.Match[str]) -> str:
+    url = trim_url(match.group(0))
+    return f"{redact_url(url)}{match.group(0)[len(url) :]}"
 
 
 def trim_url(url: str) -> str:

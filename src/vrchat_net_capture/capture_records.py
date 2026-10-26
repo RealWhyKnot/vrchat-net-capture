@@ -5,6 +5,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote_plus
 
 from capture_utils import decode_response, relative_artifact_path, unitypy_peek
 
@@ -13,11 +14,15 @@ SENSITIVE_HEADERS = {
     "cookie",
     "proxy-authorization",
     "set-cookie",
+    "x-access-token",
     "x-api-key",
+    "x-auth-token",
     "x-csrf-token",
     "x-vrc-api-key",
     "x-xsrf-token",
 }
+SENSITIVE_QUERY_PARAMS = {"apikey", "auth", "password", "passwd", "sessionid"}
+SENSITIVE_QUERY_MARKERS = ("token", "secret")
 REDACTED = "<redacted>"
 
 
@@ -101,10 +106,10 @@ def build_http_record(
         "ts_end": ts_end,
         "duration_ms": int((ts_end - ts_start) * 1000),
         "method": req.method,
-        "url": req.pretty_url,
+        "url": redact_url(req.pretty_url),
         "scheme": req.scheme,
         "host": host,
-        "path": req.path,
+        "path": redact_url(req.path),
         "status": resp.status_code if resp else None,
         "request_headers": redact_headers(req.headers.items()),
         "response_headers": redact_headers(resp.headers.items()) if resp else None,
@@ -134,6 +139,27 @@ def redact_headers(headers: Any) -> dict[str, str]:
         else:
             redacted[str(key)] = str(value)
     return redacted
+
+
+def redact_url(url: str | None) -> str | None:
+    if not url or "?" not in url:
+        return url
+    base, _, rest = url.partition("?")
+    query, hash_mark, fragment = rest.partition("#")
+    parts = [redact_query_part(part) for part in query.split("&")]
+    return f"{base}?{'&'.join(parts)}{hash_mark}{fragment}"
+
+
+def redact_query_part(part: str) -> str:
+    name, sep, value = part.partition("=")
+    if not sep or not value or not is_sensitive_query_param(name):
+        return part
+    return f"{name}={REDACTED}"
+
+
+def is_sensitive_query_param(name: str) -> bool:
+    key = unquote_plus(name).lower().replace("_", "").replace("-", "")
+    return key in SENSITIVE_QUERY_PARAMS or any(marker in key for marker in SENSITIVE_QUERY_MARKERS)
 
 
 def peer_host(conn: Any) -> str | None:

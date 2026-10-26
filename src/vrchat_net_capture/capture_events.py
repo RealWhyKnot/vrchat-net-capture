@@ -5,6 +5,8 @@ import time
 from collections import Counter
 from typing import Any
 
+from capture_records import redact_headers, redact_url
+
 
 def build_event(kind: str, flow: Any | None = None, **extra: Any) -> dict[str, Any]:
     event: dict[str, Any] = {
@@ -23,9 +25,9 @@ def flow_identity(flow: Any) -> dict[str, Any]:
     return {
         "flow_id": getattr(flow, "id", None),
         "host": (getattr(request, "pretty_host", None) or server_address(server_conn) or "").lower() or None,
-        "url": getattr(request, "pretty_url", None),
+        "url": redact_url(getattr(request, "pretty_url", None)),
         "method": getattr(request, "method", None),
-        "path": getattr(request, "path", None),
+        "path": redact_url(getattr(request, "path", None)),
         "client": connection_summary(getattr(flow, "client_conn", None)),
         "server": connection_summary(server_conn),
     }
@@ -36,7 +38,7 @@ def request_headers_event(flow: Any) -> dict[str, Any]:
     return build_event(
         "request_headers",
         flow,
-        headers=dict(req.headers.items()),
+        headers=redact_headers(req.headers.items()),
         scheme=req.scheme,
         http_version=getattr(req, "http_version", None),
     )
@@ -48,7 +50,7 @@ def response_headers_event(flow: Any) -> dict[str, Any]:
         "response_headers",
         flow,
         status=resp.status_code if resp else None,
-        headers=dict(resp.headers.items()) if resp else None,
+        headers=redact_headers(resp.headers.items()) if resp else None,
         http_version=getattr(resp, "http_version", None) if resp else None,
     )
 

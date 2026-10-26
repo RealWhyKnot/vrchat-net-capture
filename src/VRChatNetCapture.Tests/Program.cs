@@ -16,6 +16,10 @@ var tests = new (string Name, Action Body)[]
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
     ("vrchat infrastructure passes through by default", TestDefaultIgnoreHosts),
+    ("stop leaves a reused mitmdump pid alone", TestStopSkipsReusedMitmdumpPid),
+    ("stop leaves a reused raw UDP worker pid alone", TestStopSkipsReusedRawUdpPid),
+    ("stop still kills the recorded mitmdump", TestStopKillsRecordedMitmdump),
+    ("pid files match only the recorded process", TestRecordedProcessMatching),
 };
 
 var failures = 0;
@@ -315,6 +319,131 @@ static void TestMitmdumpArgs()
     Contains(analysisArgs, "photon_metadata=true");
     Contains(analysisArgs, "unity_metadata=true");
 
+}
+
+static void TestStopSkipsReusedMitmdumpPid()
+{
+    var sessionDir = NewTempDir("vnc-stale-pid");
+    using var unrelated = StartIdleProcess();
+    try
+    {
+        var pidFile = Path.Combine(sessionDir, MitmdumpProcess.PidFileName);
+        File.WriteAllText(pidFile, unrelated.Id.ToString());
+        File.SetLastWriteTimeUtc(pidFile, unrelated.StartTime.ToUniversalTime().AddMinutes(-5));
+
+        MitmdumpProcess.StopForSession(sessionDir);
+
+        False(unrelated.WaitForExit(500));
+    }
+    finally
+    {
+        ProcessTools.TryKill(unrelated);
+        Directory.Delete(sessionDir, recursive: true);
+    }
+}
+
+static void TestStopSkipsReusedRawUdpPid()
+{
+    var sessionDir = NewTempDir("vnc-stale-raw");
+    using var unrelated = StartIdleProcess();
+    try
+    {
+        var startTicks = unrelated.StartTime.ToUniversalTime().Ticks;
+        File.WriteAllText(Path.Combine(sessionDir, RawUdpWorkerHost.PidFileName), $"{unrelated.Id} {startTicks - 1}");
+
+        RawUdpWorkerHost.StopForSession(sessionDir, null);
+
+        False(unrelated.WaitForExit(500));
+        False(File.Exists(Path.Combine(sessionDir, RawUdpWorkerHost.StopFileName)));
+    }
+    finally
+    {
+        ProcessTools.TryKill(unrelated);
+        Directory.Delete(sessionDir, recursive: true);
+    }
+}
+
+static void TestStopKillsRecordedMitmdump()
+{
+    var sessionDir = NewTempDir("vnc-live-pid");
+    using var recorded = StartIdleProcess();
+    try
+    {
+        ProcessTools.WritePidFile(Path.Combine(sessionDir, MitmdumpProcess.PidFileName), recorded);
+
+        MitmdumpProcess.StopForSession(sessionDir);
+
+        True(recorded.WaitForExit(5000));
+    }
+    finally
+    {
+        ProcessTools.TryKill(recorded);
+        Directory.Delete(sessionDir, recursive: true);
+    }
+}
+
+static void TestRecordedProcessMatching()
+{
+    var dir = NewTempDir("vnc-pid-match");
+    try
+    {
+        using var current = System.Diagnostics.Process.GetCurrentProcess();
+        var started = current.StartTime.ToUniversalTime();
+        var pidFile = Path.Combine(dir, "test.pid");
+
+        ProcessTools.WritePidFile(pidFile, current);
+        Equal($"{current.Id} {started.Ticks}", File.ReadAllText(pidFile));
+        using (var match = ProcessTools.OpenRecordedProcess(pidFile))
+        {
+            Equal(current.Id, match?.Id);
+        }
+
+        File.WriteAllText(pidFile, $"{current.Id} {started.Ticks + 1}");
+        Equal(null, ProcessTools.OpenRecordedProcess(pidFile));
+
+        File.WriteAllText(pidFile, current.Id.ToString());
+        File.SetLastWriteTimeUtc(pidFile, started.AddSeconds(-1));
+        Equal(null, ProcessTools.OpenRecordedProcess(pidFile));
+        File.SetLastWriteTimeUtc(pidFile, started.AddSeconds(1));
+        using (var legacy = ProcessTools.OpenRecordedProcess(pidFile))
+        {
+            Equal(current.Id, legacy?.Id);
+        }
+
+        foreach (var bad in new[] { "", "abc", $"{current.Id} abc", "-1", $"{current.Id} -5" })
+        {
+            File.WriteAllText(pidFile, bad);
+            Equal(null, ProcessTools.OpenRecordedProcess(pidFile));
+        }
+        Equal(null, ProcessTools.OpenRecordedProcess(Path.Combine(dir, "missing.pid")));
+    }
+    finally
+    {
+        Directory.Delete(dir, recursive: true);
+    }
+}
+
+static string NewTempDir(string prefix)
+{
+    var dir = Path.Combine(Path.GetTempPath(), $"{prefix}-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+    return dir;
+}
+
+static System.Diagnostics.Process StartIdleProcess()
+{
+    var startInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = Path.Combine(Environment.SystemDirectory, "PING.EXE"),
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+    };
+    foreach (var arg in new[] { "-n", "30", "127.0.0.1" })
+    {
+        startInfo.ArgumentList.Add(arg);
+    }
+    return System.Diagnostics.Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start idle process.");
 }
 
 static void True(bool condition)

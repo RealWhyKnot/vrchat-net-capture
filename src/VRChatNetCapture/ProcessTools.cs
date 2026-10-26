@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Principal;
 using System.Text;
 
@@ -114,6 +115,72 @@ public static class ProcessTools
         {
             return false;
         }
+    }
+
+    public static void WritePidFile(string path, Process process)
+    {
+        long? startTicks;
+        try
+        {
+            startTicks = process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch
+        {
+            startTicks = null;
+        }
+        File.WriteAllText(path, startTicks is null ? $"{process.Id}" : $"{process.Id} {startTicks}");
+    }
+
+    public static Process? OpenRecordedProcess(string pidFile)
+    {
+        if (!File.Exists(pidFile))
+        {
+            return null;
+        }
+        var fields = File.ReadAllText(pidFile).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (fields.Length == 0 || !int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var pid))
+        {
+            return null;
+        }
+        long? startTicks = null;
+        if (fields.Length > 1)
+        {
+            if (!long.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var ticks))
+            {
+                return null;
+            }
+            startTicks = ticks;
+        }
+
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(pid);
+        }
+        catch
+        {
+            return null;
+        }
+        if (IsRecordedProcess(process, startTicks, File.GetLastWriteTimeUtc(pidFile)))
+        {
+            return process;
+        }
+        process.Dispose();
+        return null;
+    }
+
+    public static bool IsRecordedProcess(Process process, long? startTicks, DateTime pidFileWrittenUtc)
+    {
+        DateTime started;
+        try
+        {
+            started = process.StartTime.ToUniversalTime();
+        }
+        catch
+        {
+            return false;
+        }
+        return startTicks is long ticks ? started.Ticks == ticks : started <= pidFileWrittenUtc;
     }
 
     public static bool IsAdministrator()

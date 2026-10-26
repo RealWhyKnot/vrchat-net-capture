@@ -167,7 +167,7 @@ public sealed class CaptureApp
             var args = MitmdumpProcess.BuildArguments(_options, _paths, session, analysis);
             Console.WriteLine("[capture] launching mitmdump...");
             mitmdump = ProcessTools.StartInteractive(mitmdumpPath, args, _paths.AppDir);
-            File.WriteAllText(session.PidFile, mitmdump.Id.ToString());
+            ProcessTools.WritePidFile(session.PidFile, mitmdump);
 
             if (_options.Mode == "regular")
             {

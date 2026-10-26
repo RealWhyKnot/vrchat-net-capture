@@ -72,15 +72,14 @@ public static class MitmdumpProcess
 
     public static void StopForSession(string sessionDir)
     {
-        var pidFile = Path.Combine(sessionDir, PidFileName);
-        if (!File.Exists(pidFile) || !int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid))
+        using var process = ProcessTools.OpenRecordedProcess(Path.Combine(sessionDir, PidFileName));
+        if (process is null)
         {
             return;
         }
         try
         {
-            var process = Process.GetProcessById(pid);
-            Console.WriteLine($"[capture] killing mitmdump pid={pid}");
+            Console.WriteLine($"[capture] killing mitmdump pid={process.Id}");
             process.Kill(entireProcessTree: true);
         }
         catch
