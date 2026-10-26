@@ -27,6 +27,11 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    permissions:
+      contents: read
+    uses: RealWhyKnot/workflows/.github/workflows/repo-checks.yml@v1
+
   lint-test:
     name: dotnet + python checks
     runs-on: windows-latest

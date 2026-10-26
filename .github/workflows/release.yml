@@ -12,12 +12,13 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
     name: Build and publish release
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -32,6 +33,13 @@ jobs:
         uses: RealWhyKnot/workflows/resolve-tag@v1
         with:
           tag: ${{ github.event.inputs.tag }}
+
+      - name: Wait for CI on the release commit
+        uses: RealWhyKnot/workflows/wait-for-ci@v1
+        with:
+          sha: ${{ steps.release_tag.outputs.sha }}
+          workflow: ci.yml
+          timeout-minutes: '15'
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -91,7 +99,9 @@ jobs:
         run: |
           $tag = '${{ steps.release_tag.outputs.tag }}'
           $prev = & git describe --tags --abbrev=0 --exclude '*-*' "$tag^" 2>$null
-          $range = if ($LASTEXITCODE -eq 0 -and $prev) { "$prev..$tag" } else { $tag }
+          $found = $LASTEXITCODE -eq 0
+          $global:LASTEXITCODE = 0
+          $range = if ($found -and $prev) { "$prev..$tag" } else { $tag }
           $subjects = git log --no-merges --format='- %s (%h)' $range |
             Where-Object { $_ -notmatch '\[skip changelog\]' } |
             ForEach-Object { $_ -replace ' \(\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?\)', '' }
