@@ -69,6 +69,9 @@ public sealed class SessionMetadata
 
     [JsonPropertyName("raw_udp_ports")]
     public string RawUdpPorts { get; set; } = "";
+
+    [JsonPropertyName("capture_all_processes")]
+    public bool CaptureAllProcesses { get; set; }
 }
 
 public sealed class AnalysisOptions

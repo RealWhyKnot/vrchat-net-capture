@@ -11,6 +11,7 @@ public sealed class CaptureOptions
     public string MitmAllowHosts { get; init; } = "";
     public string MitmIgnoreHosts { get; init; } = "";
     public bool NoDefaultIgnoreHosts { get; init; }
+    public bool CaptureAllProcesses { get; init; }
     public bool NoCertInstall { get; init; }
     public bool KeepCert { get; init; }
     public bool NoUpdatePrompt { get; init; }
@@ -87,6 +88,9 @@ public sealed class CaptureOptions
                     break;
                 case "--no-default-ignore-hosts":
                     options.NoDefaultIgnoreHosts = true;
+                    break;
+                case "--capture-all-processes":
+                    options.CaptureAllProcesses = true;
                     break;
                 case "--capture-root":
                     options.CaptureRoot = RequireValue(args, ref index, arg);
@@ -175,6 +179,8 @@ public sealed class CaptureOptions
           --mitm-ignore-hosts <rx>   Extra mitmproxy host:port regex to pass through unmodified.
           --no-default-ignore-hosts  Also intercept VRChat infrastructure and the local video
                                      resolver. Worlds and videos will fail to load.
+          --capture-all-processes    Decrypt and record every program that uses the system
+                                     proxy. Default: only VRChat and programs it starts.
           --no-cert-install          Skip CurrentUser root CA install.
           --keep-cert                Keep a session-installed CA after stop.
           --no-update-prompt         Do not ask to update mitmproxy dependencies.
@@ -209,6 +215,7 @@ public sealed class CaptureOptions
         public string MitmAllowHosts { get; set; } = "";
         public string MitmIgnoreHosts { get; set; } = "";
         public bool NoDefaultIgnoreHosts { get; set; }
+        public bool CaptureAllProcesses { get; set; }
         public bool NoCertInstall { get; set; }
         public bool KeepCert { get; set; }
         public bool NoUpdatePrompt { get; set; }
@@ -234,6 +241,7 @@ public sealed class CaptureOptions
                 MitmAllowHosts = MitmAllowHosts,
                 MitmIgnoreHosts = MitmIgnoreHosts,
                 NoDefaultIgnoreHosts = NoDefaultIgnoreHosts,
+                CaptureAllProcesses = CaptureAllProcesses,
                 NoCertInstall = NoCertInstall,
                 KeepCert = KeepCert,
                 NoUpdatePrompt = NoUpdatePrompt,

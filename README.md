@@ -17,6 +17,14 @@ Active capture changes two things on your machine while it runs. It installs the
 mitmproxy CA into `Cert:\CurrentUser\Root`, and it points the Windows system proxy
 at a local mitmdump. A clean stop undoes both.
 
+Only VRChat's traffic is decrypted. For each connection the proxy looks up which
+program opened it, and anything other than `VRChat.exe` or a program VRChat
+started (such as yt-dlp) goes through without being decrypted or saved. That
+includes your browser, Discord and anything else that follows the system proxy
+while a capture runs. If the lookup fails, the connection isn't decrypted.
+`--capture-all-processes` turns this off and records every program that uses the
+proxy.
+
 On stop the app removes only the exact certificate thumbprint it installed in that
 session. If the CA was already on your machine, it's left alone. Pass
 `--keep-cert` to keep a session-installed CA between runs.

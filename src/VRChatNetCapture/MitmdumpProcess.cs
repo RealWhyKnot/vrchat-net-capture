@@ -46,6 +46,7 @@ public static class MitmdumpProcess
             "--set", $"store_osc_values={Flag(analysis.StoreOscValues)}",
             "--set", $"photon_metadata={Flag(analysis.PhotonMetadata)}",
             "--set", $"unity_metadata={Flag(analysis.UnityMetadata)}",
+            "--set", $"capture_all_processes={Flag(options.CaptureAllProcesses)}",
             "--set", "flow_detail=0",
         ]);
         return args;

@@ -41,6 +41,11 @@ public static class ConsoleReport
             $"raw_udp={OnOff(analysis.RawUdpCapture)}");
     }
 
+    public static string ProcessScopeLine(bool captureAllProcesses) =>
+        captureAllProcesses
+            ? "[capture] WARNING: --capture-all-processes is set; HTTPS from every program that uses the system proxy will be decrypted and saved."
+            : "[capture] capturing VRChat and the programs it starts; other programs go through the proxy without being decrypted or saved.";
+
     public static string ReadyActionLine(bool vrchatAlreadyRunning) =>
         vrchatAlreadyRunning
             ? " READY. VRChat is already running; continue from the current session."

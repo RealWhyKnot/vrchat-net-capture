@@ -23,6 +23,7 @@ from capture_events import (
 )
 from capture_osc import OscParseError, build_osc_summary, decode_osc_packet
 from capture_photon import build_photon_summary, classify_photon_packet
+from capture_process import DEFAULT_CAPTURE_PROCESSES, CaptureProcessFilter, parse_process_names, socket_address
 from capture_records import build_http_record, save_body, write_websocket_payload
 from capture_utils import append_jsonl, relative_artifact_path, write_per_host
 from capture_vrchat_logs import mark_unmatched_log_urls, newest_output_log, parse_vrchat_log
@@ -54,6 +55,10 @@ class CaptureAddon:
         self.store_osc_values = False
         self.photon_metadata = False
         self.unity_metadata = False
+        self.capture_all_processes = False
+        self.process_filter = CaptureProcessFilter(parse_process_names(DEFAULT_CAPTURE_PROCESSES))
+        self._clients: dict[str, bool] = {}
+        self._passed_through = 0
         self._records: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._osc_records: list[dict[str, Any]] = []
@@ -97,6 +102,26 @@ class CaptureAddon:
             default=False,
             help="Run optional UnityPy metadata peeks for detected Unity bundles.",
         )
+        loader.add_option(
+            name="capture_processes",
+            typespec=str,
+            default=DEFAULT_CAPTURE_PROCESSES,
+            help="Comma-separated program names to capture, along with the programs they start.",
+        )
+        loader.add_option(
+            name="capture_all_processes",
+            typespec=bool,
+            default=False,
+            help="Capture connections from every program that uses the proxy.",
+        )
+
+    def configure(self, updated) -> None:
+        if "capture_all_processes" in updated:
+            self.capture_all_processes = bool(ctx.options.capture_all_processes)
+        if "capture_processes" in updated:
+            self.process_filter = CaptureProcessFilter(parse_process_names(ctx.options.capture_processes))
+        if "capture_all_processes" in updated or "capture_processes" in updated:
+            self._clients.clear()
 
     def running(self) -> None:
         if self._started:
@@ -130,6 +155,13 @@ class CaptureAddon:
         ctx.log.info(f"capture_addon ready - writing to {self.capture_dir}")
         if self.ignore_hosts:
             ctx.log.info(f"  ignoring hosts: {sorted(self.ignore_hosts)}")
+        if self.capture_all_processes:
+            ctx.log.info("  capturing connections from every program that uses the proxy")
+        else:
+            programs = ", ".join(sorted(self.process_filter.names))
+            ctx.log.info(
+                f"  capturing {programs} and the programs they start; other programs are not decrypted or saved"
+            )
         if self.decode_osc:
             ctx.log.info("  OSC decode enabled for captured UDP datagrams")
         if self.photon_metadata:
@@ -165,6 +197,8 @@ class CaptureAddon:
             summary = build_summary(self._records, self._events)
             (self.capture_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
             ctx.log.info(f"capture_addon: wrote {len(self._records)} flows and {len(self._events)} events")
+            if self._passed_through:
+                ctx.log.info(f"capture_addon: skipped {self._passed_through} connections from other programs")
         except Exception as exc:
             ctx.log.error(f"capture_addon: failed to write shutdown artifacts: {exc}")
 
@@ -190,6 +224,8 @@ class CaptureAddon:
             ctx.log.error("capture_addon: error while recording flow:\n" + traceback.format_exc())
 
     def error(self, flow: http.HTTPFlow) -> None:
+        if self._should_ignore_flow(flow):
+            return
         try:
             self._record_flow(flow, errored=True)
             self._append_event(build_event("http_error", flow, error=str(flow.error) if flow.error else None))
@@ -214,58 +250,69 @@ class CaptureAddon:
         self._record_stream_event("tcp_message", flow, ".tcp.bin")
 
     def tcp_end(self, flow) -> None:
-        self._append_event(build_event("tcp_end", flow))
+        self._record_event_for_flow(flow, lambda f: build_event("tcp_end", f))
 
     def tcp_error(self, flow) -> None:
-        self._append_event(build_event("tcp_error", flow, error=str(flow.error) if flow.error else None))
+        self._record_event_for_flow(
+            flow, lambda f: build_event("tcp_error", f, error=str(f.error) if f.error else None)
+        )
 
     def udp_message(self, flow) -> None:
         self._record_stream_event("udp_message", flow, ".udp.bin")
 
     def udp_end(self, flow) -> None:
-        self._append_event(build_event("udp_end", flow))
+        self._record_event_for_flow(flow, lambda f: build_event("udp_end", f))
 
     def udp_error(self, flow) -> None:
-        self._append_event(build_event("udp_error", flow, error=str(flow.error) if flow.error else None))
+        self._record_event_for_flow(
+            flow, lambda f: build_event("udp_error", f, error=str(f.error) if f.error else None)
+        )
 
     def dns_request(self, flow) -> None:
-        self._append_event(dns_event("dns_request", flow))
+        self._record_event_for_flow(flow, lambda f: dns_event("dns_request", f))
 
     def dns_response(self, flow) -> None:
-        self._append_event(dns_event("dns_response", flow))
+        self._record_event_for_flow(flow, lambda f: dns_event("dns_response", f))
 
     def dns_error(self, flow) -> None:
-        self._append_event(dns_event("dns_error", flow))
+        self._record_event_for_flow(flow, lambda f: dns_event("dns_error", f))
 
     def tls_clienthello(self, data) -> None:
+        if not self._client_allowed(getattr(getattr(data, "context", None), "client", None)):
+            data.ignore_connection = True
+            return
         self._append_event(tls_clienthello_event(data))
 
     def tls_established_client(self, data) -> None:
-        self._append_event(tls_event("tls_established_client", data))
+        self._record_tls_event("tls_established_client", data)
 
     def tls_established_server(self, data) -> None:
-        self._append_event(tls_event("tls_established_server", data))
+        self._record_tls_event("tls_established_server", data)
 
     def tls_failed_client(self, data) -> None:
-        self._append_event(tls_event("tls_failed_client", data))
+        self._record_tls_event("tls_failed_client", data)
 
     def tls_failed_server(self, data) -> None:
-        self._append_event(tls_event("tls_failed_server", data))
+        self._record_tls_event("tls_failed_server", data)
 
     def server_connect(self, data) -> None:
-        self._append_event(server_event("server_connect", data))
+        self._record_server_event("server_connect", data)
 
     def server_connected(self, data) -> None:
-        self._append_event(server_event("server_connected", data))
+        self._record_server_event("server_connected", data)
 
     def server_connect_error(self, data) -> None:
-        self._append_event(server_event("server_connect_error", data))
+        self._record_server_event("server_connect_error", data)
 
     def client_connected(self, client) -> None:
-        self._append_event(build_event("client_connected", None, client=str(client)))
+        if self._client_allowed(client):
+            self._append_event(build_event("client_connected", None, client=str(client)))
 
     def client_disconnected(self, client) -> None:
-        self._append_event(build_event("client_disconnected", None, client=str(client)))
+        allowed = self._client_allowed(client)
+        self._clients.pop(getattr(client, "id", None), None)
+        if allowed:
+            self._append_event(build_event("client_disconnected", None, client=str(client)))
 
     def _record_flow(self, flow: http.HTTPFlow, errored: bool = False) -> None:
         assert self.capture_dir and self.bodies_dir and self.decoded_dir and self.by_host_dir and self.flows_jsonl
@@ -295,7 +342,17 @@ class CaptureAddon:
         except Exception:
             ctx.log.error("capture_addon: error while recording event:\n" + traceback.format_exc())
 
+    def _record_tls_event(self, kind: str, data) -> None:
+        if self._client_allowed(getattr(getattr(data, "context", None), "client", None)):
+            self._append_event(tls_event(kind, data))
+
+    def _record_server_event(self, kind: str, data) -> None:
+        if self._client_allowed(getattr(data, "client", None)):
+            self._append_event(server_event(kind, data))
+
     def _record_stream_event(self, kind: str, flow, suffix: str) -> None:
+        if not self._client_allowed(getattr(flow, "client_conn", None)):
+            return
         try:
             assert self.capture_dir and self.streams_dir
             event, content = stream_event(kind, flow)
@@ -388,8 +445,28 @@ class CaptureAddon:
         )
 
     def _should_ignore_flow(self, flow: http.HTTPFlow) -> bool:
-        host = (flow.request.pretty_host or "").lower() if getattr(flow, "request", None) else ""
+        if not self._client_allowed(getattr(flow, "client_conn", None)):
+            return True
+        request = getattr(flow, "request", None)
+        host = (getattr(request, "pretty_host", None) or "").lower() if request is not None else ""
         return host in self.ignore_hosts
+
+    def _client_allowed(self, client) -> bool:
+        if self.capture_all_processes:
+            return True
+        client_id = getattr(client, "id", None)
+        if client_id is None:
+            return False
+        allowed = self._clients.get(client_id)
+        if allowed is None:
+            allowed = self.process_filter.allows(
+                socket_address(getattr(client, "peername", None)),
+                socket_address(getattr(client, "sockname", None)),
+            )
+            self._clients[client_id] = allowed
+            if not allowed:
+                self._passed_through += 1
+        return allowed
 
     def _warn(self, message: str) -> None:
         if hasattr(ctx.log, "warning"):

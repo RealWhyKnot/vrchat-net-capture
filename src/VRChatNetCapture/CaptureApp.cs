@@ -140,6 +140,7 @@ public sealed class CaptureApp
             {
                 Console.WriteLine("[capture] WARNING: --no-default-ignore-hosts is set; VRChat world downloads and video playback will fail.");
             }
+            Console.WriteLine(ConsoleReport.ProcessScopeLine(_options.CaptureAllProcesses));
 
             var metadata = new SessionMetadata
             {
@@ -160,6 +161,7 @@ public sealed class CaptureApp
                 UnityMetadata = analysis.UnityMetadata,
                 RawUdpCapture = analysis.RawUdpCapture,
                 RawUdpPorts = analysis.RawUdpPorts,
+                CaptureAllProcesses = _options.CaptureAllProcesses,
             };
             JsonFiles.Write(session.SessionFile, metadata);
             JsonFiles.Write(session.LatestPointer, metadata);

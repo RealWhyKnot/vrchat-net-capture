@@ -16,6 +16,7 @@ var tests = new (string Name, Action Body)[]
     ("certificate removal is exact-session only", TestCertificateRemovalDecision),
     ("mitmdump args follow mode", TestMitmdumpArgs),
     ("vrchat infrastructure passes through by default", TestDefaultIgnoreHosts),
+    ("only VRChat is captured unless all processes are requested", TestCaptureAllProcesses),
     ("stop leaves a reused mitmdump pid alone", TestStopSkipsReusedMitmdumpPid),
     ("stop leaves a reused raw UDP worker pid alone", TestStopSkipsReusedRawUdpPid),
     ("stop still kills the recorded mitmdump", TestStopKillsRecordedMitmdump),
@@ -99,6 +100,26 @@ static void TestDefaultIgnoreHosts()
     var session = new CaptureSession { CaptureDir = Path.Combine(root, "captures", "one") };
     Contains(MitmdumpProcess.BuildArguments(CaptureOptions.Parse([]), paths, session), "--ignore-hosts");
     False(MitmdumpProcess.BuildArguments(opted, paths, session).Contains("--ignore-hosts"));
+}
+
+static void TestCaptureAllProcesses()
+{
+    var root = Path.Combine(Path.GetTempPath(), "vnc-process-scope");
+    var paths = new CapturePaths(root, Path.Combine(root, "captures"));
+    var session = new CaptureSession { CaptureDir = Path.Combine(root, "captures", "one") };
+
+    var defaults = CaptureOptions.Parse([]);
+    False(defaults.CaptureAllProcesses);
+    var defaultArgs = MitmdumpProcess.BuildArguments(defaults, paths, session);
+    Contains(defaultArgs, "capture_all_processes=false");
+    False(defaultArgs.Contains("capture_all_processes=true"));
+    True(ConsoleReport.ProcessScopeLine(false).Contains("without being decrypted", StringComparison.Ordinal));
+
+    var all = CaptureOptions.Parse(["--capture-all-processes"]);
+    True(all.CaptureAllProcesses);
+    Contains(MitmdumpProcess.BuildArguments(all, paths, session), "capture_all_processes=true");
+    True(ConsoleReport.ProcessScopeLine(true).Contains("WARNING", StringComparison.Ordinal));
+    True(CaptureOptions.Usage("app").Contains("--capture-all-processes", StringComparison.Ordinal));
 }
 
 static void TestStopCommand()

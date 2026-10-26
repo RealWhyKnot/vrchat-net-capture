@@ -24,6 +24,7 @@
     <None Include="..\vrchat_net_capture\capture_events.py" Link="python\capture_events.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_osc.py" Link="python\capture_osc.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_photon.py" Link="python\capture_photon.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\vrchat_net_capture\capture_process.py" Link="python\capture_process.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_records.py" Link="python\capture_records.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_utils.py" Link="python\capture_utils.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\vrchat_net_capture\capture_vrchat_logs.py" Link="python\capture_vrchat_logs.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

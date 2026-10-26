@@ -4,6 +4,8 @@ All notable user-visible changes to vrchat-net-capture are tracked here.
 
 ## Unreleased
 
+- Only VRChat and the programs it starts are decrypted and recorded. Other programs that follow the system proxy, such as browsers and Discord, go through without being decrypted or saved, and a connection whose program can't be identified is treated the same way. `--capture-all-processes` restores the old behavior.
+- `--ignore-hosts` now also leaves out `http_error` events for those hosts.
 - Header events in `events.jsonl` now redact the same headers as `flows.jsonl`. Captured URLs, and URLs copied from VRChat's log, hide token-like query parameters such as `token`, `authToken`, `apiKey` and `password`.
 - `stop` checks that a PID file still points at the mitmdump or raw UDP worker the capture started, so it no longer kills an unrelated program that Windows gave the same PID.
 - VRChat infrastructure and the local video resolver now pass through the proxy by default, so worlds download and videos play during a capture. `--mitm-ignore-hosts` now adds to that set rather than replacing it, and `--no-default-ignore-hosts` restores the old behavior.
