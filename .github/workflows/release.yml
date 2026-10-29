@@ -64,7 +64,7 @@ jobs:
 
       - name: Validate
         shell: pwsh
-        run: ./scripts/lint.ps1
+        run: ./.github/lint/lint.ps1
 
       - name: Build distribution
         shell: pwsh

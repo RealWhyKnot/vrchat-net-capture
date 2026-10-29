@@ -180,8 +180,8 @@ mitmproxy dump files aren't written at all.
 ## Development
 
 ```powershell
-.\scripts\format.ps1
-.\scripts\lint.ps1
+.\.github\lint\format.ps1
+.\.github\lint\lint.ps1
 .\build.ps1
 .\build.ps1 -Package
 ```
