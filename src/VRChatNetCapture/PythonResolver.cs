@@ -1,10 +1,10 @@
 namespace VRChatNetCapture;
 
-public static class PythonResolver
+internal static class PythonResolver
 {
     public static async Task<PythonCommand?> FindPythonAsync(CancellationToken cancellationToken)
     {
-        var py = await ProcessTools.RunAsync("where", ["py"], hidden: true, cancellationToken: cancellationToken).ConfigureAwait(false);
+        ProcessResult py = await ProcessTools.RunAsync("where", ["py"], hidden: true, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (py.ExitCode == 0)
         {
             var candidate = new PythonCommand { FileName = "py", PrefixArgs = ["-3"] };
@@ -14,12 +14,12 @@ public static class PythonResolver
             }
         }
 
-        var python = await ProcessTools.RunAsync("where", ["python"], hidden: true, cancellationToken: cancellationToken).ConfigureAwait(false);
+        ProcessResult python = await ProcessTools.RunAsync("where", ["python"], hidden: true, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (python.ExitCode == 0)
         {
-            foreach (var line in python.Stdout.SplitLines())
+            foreach (string line in python.Stdout.SplitLines())
             {
-                var path = line.Trim();
+                string path = line.Trim();
                 if (path.Length == 0 || path.EndsWith(@"WindowsApps\python.exe", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -37,7 +37,7 @@ public static class PythonResolver
 
     public static async Task<int> RunPythonAsync(PythonCommand python, IEnumerable<string> args, CancellationToken cancellationToken)
     {
-        var result = await ProcessTools.RunAsync(
+        ProcessResult result = await ProcessTools.RunAsync(
             python.FileName,
             python.PrefixArgs.Concat(args),
             hidden: false,
@@ -48,14 +48,14 @@ public static class PythonResolver
         }
         if (!string.IsNullOrWhiteSpace(result.Stderr))
         {
-            Console.Error.Write(result.Stderr);
+            await Console.Error.WriteAsync(result.Stderr);
         }
         return result.ExitCode;
     }
 
     public static async Task<bool> IsMitmproxyImportableAsync(PythonCommand python, CancellationToken cancellationToken)
     {
-        var result = await ProcessTools.RunAsync(
+        ProcessResult result = await ProcessTools.RunAsync(
             python.FileName,
             python.PrefixArgs.Concat(["-c", "import mitmproxy, sys; sys.exit(0)"]),
             hidden: true,
@@ -65,7 +65,7 @@ public static class PythonResolver
 
     public static async Task<string?> ResolveMitmdumpAsync(PythonCommand python, CancellationToken cancellationToken)
     {
-        const string script = """
+        const string Script = """
             import os
             import sys
             import sysconfig
@@ -73,26 +73,27 @@ public static class PythonResolver
             cands = [sysconfig.get_path("scripts")]
             try:
                 cands.append(sysconfig.get_path("scripts", "nt_user"))
-            except Exception:
-                pass
+            except KeyError as error:
+                import logging
+                logging.getLogger(__name__).debug("%s", error)
             cands.append(os.path.join(os.path.dirname(sys.executable), "Scripts"))
             for p in cands:
                 if p:
-                    print(p)
+                    sys.stdout.write(p + "\n")
             """;
 
-        var dirs = await ProcessTools.RunAsync(
+        ProcessResult dirs = await ProcessTools.RunAsync(
             python.FileName,
-            python.PrefixArgs.Concat(["-c", script]),
+            python.PrefixArgs.Concat(["-c", Script]),
             hidden: true,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         if (dirs.ExitCode == 0)
         {
-            foreach (var dir in dirs.Stdout.SplitLines().Select(static l => l.Trim()).Where(static l => l.Length > 0))
+            foreach (string? dir in dirs.Stdout.SplitLines().Select(static l => l.Trim()).Where(static l => l.Length > 0))
             {
-                foreach (var name in new[] { "mitmdump.exe", "mitmdump" })
+                foreach (string? name in new[] { "mitmdump.exe", "mitmdump" })
                 {
-                    var candidate = Path.Combine(dir, name);
+                    string candidate = Path.Combine(dir, name);
                     if (File.Exists(candidate))
                     {
                         return candidate;
@@ -101,20 +102,20 @@ public static class PythonResolver
             }
         }
 
-        var where = await ProcessTools.RunAsync("where", ["mitmdump"], hidden: true, cancellationToken: cancellationToken)
+        ProcessResult where = await ProcessTools.RunAsync("where", ["mitmdump"], hidden: true, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         return where.ExitCode == 0 ? where.Stdout.SplitLines().FirstOrDefault(static l => l.Trim().Length > 0)?.Trim() : null;
     }
 
     public static async Task<string?> GetMitmproxyVersionAsync(string mitmdumpPath, CancellationToken cancellationToken)
     {
-        var result = await ProcessTools.RunAsync(mitmdumpPath, ["--version"], hidden: true, cancellationToken: cancellationToken)
+        ProcessResult result = await ProcessTools.RunAsync(mitmdumpPath, ["--version"], hidden: true, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             return null;
         }
-        foreach (var line in result.Stdout.SplitLines().Concat(result.Stderr.SplitLines()))
+        foreach (string? line in result.Stdout.SplitLines().Concat(result.Stderr.SplitLines()))
         {
             if (line.StartsWith("Mitmproxy:", StringComparison.OrdinalIgnoreCase))
             {
@@ -130,29 +131,19 @@ public static class PythonResolver
         {
             return false;
         }
-        var parts = mitmproxyVersion.Split('.');
-        if (parts.Length < 2)
-        {
-            return false;
-        }
-        return int.TryParse(parts[0], out var major)
-            && int.TryParse(parts[1], out var minor)
+        string[] parts = mitmproxyVersion.Split('.');
+        return parts.Length >= 2 && int.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out int major)
+            && int.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out int minor)
             && (major > 10 || (major == 10 && minor >= 2));
     }
 
     private static async Task<bool> IsPython3Async(PythonCommand python, CancellationToken cancellationToken)
     {
-        var result = await ProcessTools.RunAsync(
+        ProcessResult result = await ProcessTools.RunAsync(
             python.FileName,
             python.PrefixArgs.Concat(["--version"]),
             hidden: true,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0 && (result.Stdout + result.Stderr).Contains("Python 3.", StringComparison.OrdinalIgnoreCase);
     }
-}
-
-internal static class StringExtensions
-{
-    public static IEnumerable<string> SplitLines(this string value) =>
-        value.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
 }

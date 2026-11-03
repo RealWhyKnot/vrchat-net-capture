@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace VRChatNetCapture;
 
-public static class UdpEndpointDiscovery
+internal static class UdpEndpointDiscovery
 {
     private static readonly HashSet<int> ExcludedPorts = [5353];
 
@@ -15,7 +15,7 @@ public static class UdpEndpointDiscovery
             return [];
         }
 
-        var name = Path.GetFileNameWithoutExtension(processName);
+        string name = Path.GetFileNameWithoutExtension(processName);
         if (string.IsNullOrWhiteSpace(name))
         {
             return [];
@@ -27,52 +27,43 @@ public static class UdpEndpointDiscovery
             return [];
         }
 
-        var result = await ProcessTools.RunAsync(
+        ProcessResult result = await ProcessTools.RunAsync(
             "netstat.exe",
             ["-ano", "-p", "udp"],
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0)
-        {
-            return [];
-        }
-
-        return ParseNetstatUdpPorts(result.Stdout, pids);
+        return result.ExitCode != 0 ? [] : ParseNetstatUdpPorts(result.Stdout, pids);
     }
 
     public static IReadOnlyList<int> ParseNetstatUdpPorts(string output, ISet<int> pids)
     {
         var ports = new SortedSet<int>();
-        foreach (var rawLine in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        foreach (string rawLine in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
-            var line = rawLine.Trim();
+            string line = rawLine.Trim();
             if (!line.StartsWith("UDP", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 4 || !int.TryParse(parts[^1], out var pid) || !pids.Contains(pid))
+            string[] parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 4 || !int.TryParse(parts[^1], System.Globalization.CultureInfo.InvariantCulture, out int pid) || !pids.Contains(pid))
             {
                 continue;
             }
 
-            var port = ParseEndpointPort(parts[1]);
+            int? port = ParseEndpointPort(parts[1]);
             if (port is > 0 and <= 65535 && !ExcludedPorts.Contains(port.Value))
             {
                 ports.Add(port.Value);
             }
         }
 
-        return ports.ToList();
+        return [.. ports];
     }
 
     private static int? ParseEndpointPort(string endpoint)
     {
-        var index = endpoint.LastIndexOf(':');
-        if (index < 0 || index == endpoint.Length - 1)
-        {
-            return null;
-        }
-        return int.TryParse(endpoint[(index + 1)..], out var port) ? port : null;
+        int index = endpoint.LastIndexOf(':');
+        return index < 0 || index == endpoint.Length - 1 ? null : int.TryParse(endpoint[(index + 1)..], System.Globalization.CultureInfo.InvariantCulture, out int port) ? port : null;
     }
 }

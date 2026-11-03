@@ -5,18 +5,18 @@ using Microsoft.Win32.SafeHandles;
 
 namespace VRChatNetCapture;
 
-public sealed class ChildProcessTracker : IDisposable
+internal sealed partial class ChildProcessTracker : IDisposable
 {
-    private static readonly object Sync = new();
-    private static ChildProcessTracker? current;
-    private readonly ChildProcessTracker? previous;
-    private readonly SafeJobHandle? job;
-    private bool disposed;
+    private static readonly Lock Sync = new();
+    private static ChildProcessTracker? CurrentTracker;
+    private readonly ChildProcessTracker? _previous;
+    private readonly SafeJobHandle? _job;
+    private bool _disposed;
 
-    private ChildProcessTracker(SafeJobHandle? job, ChildProcessTracker? previous)
+    private ChildProcessTracker(SafeJobHandle? jobHandle, ChildProcessTracker? previousTracker)
     {
-        this.job = job;
-        this.previous = previous;
+        _job = jobHandle;
+        _previous = previousTracker;
     }
 
     public static ChildProcessTracker? Current
@@ -25,38 +25,35 @@ public sealed class ChildProcessTracker : IDisposable
         {
             lock (Sync)
             {
-                return current;
+                return CurrentTracker;
             }
         }
     }
 
     public static ChildProcessTracker Create()
     {
-        var previous = Current;
-        var job = OperatingSystem.IsWindows() ? CreateKillOnCloseJob() : null;
-        var tracker = new ChildProcessTracker(job, previous);
+        ChildProcessTracker? previousTracker = Current;
+        SafeJobHandle? jobHandle = OperatingSystem.IsWindows() ? CreateKillOnCloseJob() : null;
+        var tracker = new ChildProcessTracker(jobHandle, previousTracker);
         lock (Sync)
         {
-            current = tracker;
+            CurrentTracker = tracker;
         }
         return tracker;
     }
 
     public void Add(Process process)
     {
-        if (disposed)
-        {
-            throw new ObjectDisposedException(nameof(ChildProcessTracker));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, nameof(ChildProcessTracker));
         if (!OperatingSystem.IsWindows())
         {
             return;
         }
-        if (job is null || job.IsInvalid)
+        if (_job is null || _job.IsInvalid)
         {
             throw new InvalidOperationException("Child process tracking is unavailable.");
         }
-        if (!AssignProcessToJobObject(job, process.Handle))
+        if (!AssignProcessToJobObject(_job, process.Handle))
         {
             throw new Win32Exception(Marshal.GetLastPInvokeError(), $"Failed to attach child process {process.Id} to the capture job.");
         }
@@ -64,25 +61,25 @@ public sealed class ChildProcessTracker : IDisposable
 
     public void Dispose()
     {
-        if (disposed)
+        if (_disposed)
         {
             return;
         }
-        disposed = true;
+        _disposed = true;
         lock (Sync)
         {
-            if (ReferenceEquals(current, this))
+            if (ReferenceEquals(CurrentTracker, this))
             {
-                current = previous;
+                CurrentTracker = _previous;
             }
         }
-        job?.Dispose();
+        _job?.Dispose();
     }
 
     private static SafeJobHandle CreateKillOnCloseJob()
     {
-        var job = CreateJobObject(IntPtr.Zero, null);
-        if (job.IsInvalid)
+        SafeJobHandle jobHandle = CreateJobObject(IntPtr.Zero, name: null);
+        if (jobHandle.IsInvalid)
         {
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Failed to create child process tracking job.");
         }
@@ -94,31 +91,36 @@ public sealed class ChildProcessTracker : IDisposable
                 LimitFlags = JobObjectLimitKillOnJobClose,
             },
         };
-        var length = Marshal.SizeOf<JobObjectExtendedLimitInformation>();
-        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformationClass, ref info, (uint)length))
+        int length = Marshal.SizeOf<JobObjectExtendedLimitInformation>();
+        if (!SetInformationJobObject(jobHandle, JobObjectExtendedLimitInformationClass, ref info, (uint)length))
         {
-            var error = Marshal.GetLastPInvokeError();
-            job.Dispose();
+            int error = Marshal.GetLastPInvokeError();
+            jobHandle.Dispose();
             throw new Win32Exception(error, "Failed to configure child process tracking job.");
         }
-        return job;
+        return jobHandle;
     }
 
     private const int JobObjectExtendedLimitInformationClass = 9;
     private const int JobObjectLimitKillOnJobClose = 0x00002000;
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern SafeJobHandle CreateJobObject(IntPtr securityAttributes, string? name);
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateJobObjectW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeJobHandle CreateJobObject(IntPtr securityAttributes, string? name);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetInformationJobObject(
-        SafeJobHandle job,
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetInformationJobObject(
+        SafeJobHandle jobHandle,
         int informationClass,
         ref JobObjectExtendedLimitInformation jobObjectInformation,
         uint jobObjectInformationLength);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AssignProcessToJobObject(SafeJobHandle job, IntPtr process);
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AssignProcessToJobObject(SafeJobHandle jobHandle, IntPtr process);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct JobObjectBasicLimitInformation
@@ -156,16 +158,18 @@ public sealed class ChildProcessTracker : IDisposable
         public UIntPtr PeakJobMemoryUsed;
     }
 
-    private sealed class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
+    private sealed partial class SafeJobHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
-        private SafeJobHandle()
+        public SafeJobHandle()
             : base(ownsHandle: true)
         {
         }
 
         protected override bool ReleaseHandle() => CloseHandle(handle);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool CloseHandle(IntPtr handle);
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool CloseHandle(IntPtr handle);
     }
 }

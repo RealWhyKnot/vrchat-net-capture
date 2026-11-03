@@ -3,69 +3,98 @@ from __future__ import annotations
 import base64
 import time
 from collections import Counter
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, cast
 
-from capture_records import redact_headers, redact_url
+from mitmproxy.connection import Client, Server
+from mitmproxy.http import HTTPFlow
+from typing_extensions import Unpack
+
+from vrchat_net_capture.capture_schema import (
+    CaptureEvent,
+    CaptureSummary,
+    ConnectionSummary,
+    EventDetails,
+    FlowIdentity,
+    PayloadEvent,
+    PayloadPreview,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from mitmproxy.connection import Connection
+    from mitmproxy.dns import DNSFlow
+    from mitmproxy.flow import Flow
+    from mitmproxy.proxy.server_hooks import ServerConnectionHookData
+    from mitmproxy.tcp import TCPFlow
+    from mitmproxy.tls import ClientHelloData, TlsData
+    from mitmproxy.udp import UDPFlow
+
+from vrchat_net_capture.capture_records import http_headers, redact_headers, redact_url
 
 
-def build_event(kind: str, flow: Any | None = None, **extra: Any) -> dict[str, Any]:
-    event: dict[str, Any] = {
-        "kind": kind,
-        "ts": time.time(),
-    }
+class StreamMessage(Protocol):
+    content: bytes
+    from_client: bool
+    timestamp: float
+
+
+def build_event(kind: str, flow: Flow | None = None, **extra: Unpack[EventDetails]) -> CaptureEvent:
+    event: CaptureEvent = {"kind": kind, "ts": time.time()}
     if flow is not None:
-        event.update(flow_identity(flow))
-    event.update(extra)
-    return json_safe(event)
+        event.update(**flow_identity(flow))
+    event.update(**extra)
+    return event
 
 
-def flow_identity(flow: Any) -> dict[str, Any]:
-    request = getattr(flow, "request", None)
-    server_conn = getattr(flow, "server_conn", None)
+def flow_identity(flow: Flow) -> FlowIdentity:
+    request = flow.request if isinstance(flow, HTTPFlow) else None
+    server_conn = flow.server_conn
     return {
-        "flow_id": getattr(flow, "id", None),
-        "host": (getattr(request, "pretty_host", None) or server_address(server_conn) or "").lower() or None,
-        "url": redact_url(getattr(request, "pretty_url", None)),
-        "method": getattr(request, "method", None),
-        "path": redact_url(getattr(request, "path", None)),
-        "client": connection_summary(getattr(flow, "client_conn", None)),
+        "flow_id": flow.id,
+        "host": ((request.pretty_host if request is not None else None) or server_address(server_conn) or "").lower()
+        or None,
+        "url": redact_url(request.pretty_url if request is not None else None),
+        "method": (request.method if request is not None else None),
+        "path": redact_url(request.path if request is not None else None),
+        "client": connection_summary(flow.client_conn),
         "server": connection_summary(server_conn),
     }
 
 
-def request_headers_event(flow: Any) -> dict[str, Any]:
+def request_headers_event(flow: HTTPFlow) -> CaptureEvent:
     req = flow.request
     return build_event(
         "request_headers",
         flow,
-        headers=redact_headers(req.headers.items()),
+        headers=redact_headers(http_headers(req).items()),
         scheme=req.scheme,
-        http_version=getattr(req, "http_version", None),
+        http_version=req.http_version,
     )
 
 
-def response_headers_event(flow: Any) -> dict[str, Any]:
+def response_headers_event(flow: HTTPFlow) -> CaptureEvent:
     resp = flow.response
     return build_event(
         "response_headers",
         flow,
         status=resp.status_code if resp else None,
-        headers=redact_headers(resp.headers.items()) if resp else None,
-        http_version=getattr(resp, "http_version", None) if resp else None,
+        headers=redact_headers(http_headers(resp).items()) if resp else None,
+        http_version=resp.http_version if resp else None,
     )
 
 
-def http_connect_event(kind: str, flow: Any) -> dict[str, Any]:
-    error = getattr(flow, "error", None)
+def http_connect_event(kind: str, flow: HTTPFlow) -> CaptureEvent:
+    error = flow.error
     return build_event(kind, flow, error=str(error) if error else None)
 
 
-def websocket_event(kind: str, flow: Any) -> tuple[dict[str, Any], bytes]:
-    ws = getattr(flow, "websocket", None)
-    messages = getattr(ws, "messages", None) or []
+def websocket_event(kind: str, flow: HTTPFlow) -> PayloadEvent:
+    ws = flow.websocket
+    messages = ws.messages if ws is not None else []
     msg = messages[-1] if messages else None
-    content = getattr(msg, "content", b"") or b""
-    is_text = bool(getattr(msg, "is_text", False)) if msg else False
+    content = (msg.content if msg is not None else b"") or b""
+    is_text = bool(msg.is_text) if msg else False
     text_preview = None
     if is_text and content:
         text_preview = content[:2048].decode("utf-8", errors="replace")
@@ -73,78 +102,84 @@ def websocket_event(kind: str, flow: Any) -> tuple[dict[str, Any], bytes]:
     event = build_event(
         kind,
         flow,
-        direction="client_to_server" if getattr(msg, "from_client", False) else "server_to_client" if msg else None,
-        opcode=str(getattr(msg, "type", None)) if msg else None,
+        direction="client_to_server"
+        if (msg.from_client if msg is not None else False)
+        else "server_to_client"
+        if msg
+        else None,
+        opcode=str(msg.type) if msg else None,
         is_text=is_text,
         size=len(content),
         text_preview=text_preview,
-        timestamp=getattr(msg, "timestamp", None) if msg else None,
-        dropped=getattr(msg, "dropped", None) if msg else None,
-        injected=getattr(msg, "injected", None) if msg else None,
+        timestamp=msg.timestamp if msg else None,
+        dropped=msg.dropped if msg else None,
+        injected=msg.injected if msg else None,
     )
-    return event, content
+    return PayloadEvent(event, content)
 
 
-def stream_event(kind: str, flow: Any) -> tuple[dict[str, Any], bytes]:
-    messages = getattr(flow, "messages", None) or []
-    msg = messages[-1] if messages else None
-    content = getattr(msg, "content", b"") or b""
+def stream_event(kind: str, flow: TCPFlow | UDPFlow) -> PayloadEvent:
+    messages = flow.messages
+    msg = cast("StreamMessage", messages[-1]) if messages else None
+    content = (msg.content if msg is not None else b"") or b""
     event = build_event(
         kind,
         flow,
         capture_semantics="proxy_observed",
-        direction="client_to_server" if getattr(msg, "from_client", False) else "server_to_client" if msg else None,
+        direction="client_to_server"
+        if (msg.from_client if msg is not None else False)
+        else "server_to_client"
+        if msg
+        else None,
         size=len(content),
-        timestamp=getattr(msg, "timestamp", None) if msg else None,
+        timestamp=msg.timestamp if msg else None,
         preview=payload_preview(content),
     )
-    return event, content
+    return PayloadEvent(event, content)
 
 
-def dns_event(kind: str, flow: Any) -> dict[str, Any]:
-    request = getattr(flow, "request", None)
-    response = getattr(flow, "response", None)
-    error = getattr(flow, "error", None)
+def dns_event(kind: str, flow: DNSFlow) -> CaptureEvent:
+    request = flow.request
+    response = flow.response
+    error = flow.error
     return build_event(
         kind,
         flow,
-        questions=[str(q) for q in getattr(request, "questions", [])] if request else [],
-        answers=[str(a) for a in getattr(response, "answers", [])] if response else [],
+        questions=[str(q) for q in request.questions] if request else [],
+        answers=[str(a) for a in response.answers] if response else [],
         error=str(error) if error else None,
     )
 
 
-def tls_clienthello_event(data: Any) -> dict[str, Any]:
-    client_hello = getattr(data, "client_hello", None)
-    alpn = []
-    for proto in getattr(client_hello, "alpn_protocols", []) or []:
-        alpn.append(proto.decode("ascii", errors="replace") if isinstance(proto, bytes) else str(proto))
+def tls_clienthello_event(data: ClientHelloData) -> CaptureEvent:
+    client_hello = data.client_hello
+    alpn = [proto.decode("ascii", errors="replace") for proto in client_hello.alpn_protocols or []]
 
     return build_event(
         "tls_clienthello",
         None,
-        sni=getattr(client_hello, "sni", None),
+        sni=client_hello.sni,
         alpn_protocols=alpn,
-        client=connection_summary(getattr(getattr(data, "context", None), "client", None)),
-        server=connection_summary(getattr(getattr(data, "context", None), "server", None)),
+        client=connection_summary(data.context.client),
+        server=connection_summary(data.context.server),
     )
 
 
-def tls_event(kind: str, data: Any) -> dict[str, Any]:
-    conn = getattr(data, "conn", None)
-    error = getattr(conn, "error", None)
+def tls_event(kind: str, data: TlsData) -> CaptureEvent:
+    conn = data.conn
+    error = conn.error
     return build_event(
         kind,
         None,
         connection=connection_summary(conn),
         error=str(error) if error else None,
-        is_dtls=bool(getattr(data, "is_dtls", False)),
+        is_dtls=bool(data.is_dtls),
     )
 
 
-def server_event(kind: str, data: Any) -> dict[str, Any]:
-    server = getattr(data, "server", None)
-    error = getattr(server, "error", None)
+def server_event(kind: str, data: ServerConnectionHookData) -> CaptureEvent:
+    server = data.server
+    error = server.error
     return build_event(
         kind,
         None,
@@ -153,7 +188,7 @@ def server_event(kind: str, data: Any) -> dict[str, Any]:
     )
 
 
-def build_summary(records: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, Any]:
+def build_summary(records: Sequence[Mapping[str, object]], events: Sequence[Mapping[str, object]]) -> CaptureSummary:
     status_counts: Counter[str] = Counter()
     host_counts: Counter[str] = Counter()
     method_counts: Counter[str] = Counter()
@@ -190,39 +225,41 @@ def build_summary(records: list[dict[str, Any]], events: list[dict[str, Any]]) -
     }
 
 
-def connection_summary(conn: Any) -> dict[str, Any] | None:
+def connection_summary(conn: Connection | None) -> ConnectionSummary | None:
     if conn is None:
         return None
     return {
-        "address": address_to_string(getattr(conn, "address", None)),
-        "peername": address_to_string(getattr(conn, "peername", None)),
-        "sockname": address_to_string(getattr(conn, "sockname", None)),
-        "sni": getattr(conn, "sni", None),
-        "alpn": alpn_to_string(getattr(conn, "alpn", None)),
-        "tls_established": getattr(conn, "tls_established", None),
-        "error": str(getattr(conn, "error", None)) if getattr(conn, "error", None) else None,
+        "address": address_to_string(
+            conn.address if isinstance(conn, Server) else conn.peername if isinstance(conn, Client) else None
+        ),
+        "peername": address_to_string(conn.peername),
+        "sockname": address_to_string(conn.sockname),
+        "sni": conn.sni,
+        "alpn": alpn_to_string(conn.alpn),
+        "tls_established": conn.tls_established,
+        "error": str(conn.error) if conn.error else None,
     }
 
 
-def server_address(conn: Any) -> str | None:
-    address = getattr(conn, "address", None)
+def server_address(conn: Connection | None) -> str | None:
+    address = conn.address if isinstance(conn, Server) else conn.peername if isinstance(conn, Client) else None
     if not address:
         return None
     try:
         return address[0]
-    except Exception:
+    except (TypeError, IndexError, KeyError):
         return str(address)
 
 
-def address_to_string(address: Any) -> str | None:
+def address_to_string(address: object) -> str | None:
     if not address:
         return None
     if isinstance(address, tuple):
-        return ":".join(str(part) for part in address)
+        return ":".join(str(part) for part in cast("tuple[object, ...]", address))
     return str(address)
 
 
-def alpn_to_string(alpn: Any) -> str | None:
+def alpn_to_string(alpn: object) -> str | None:
     if alpn is None:
         return None
     if isinstance(alpn, bytes):
@@ -230,7 +267,7 @@ def alpn_to_string(alpn: Any) -> str | None:
     return str(alpn)
 
 
-def failure_target(event: dict[str, Any]) -> str | None:
+def failure_target(event: Mapping[str, object]) -> str | None:
     host = event.get("host")
     if host:
         return str(host)
@@ -239,13 +276,13 @@ def failure_target(event: dict[str, Any]) -> str | None:
         if not isinstance(value, dict):
             continue
         for field in ("sni", "address", "peername", "sockname"):
-            field_value = value.get(field)
+            field_value = cast("Mapping[str, object]", value).get(field)
             if field_value:
                 return str(field_value)
     return None
 
 
-def payload_preview(content: bytes) -> dict[str, Any] | None:
+def payload_preview(content: bytes) -> PayloadPreview | None:
     if not content:
         return None
     sample = content[:256]
@@ -253,17 +290,9 @@ def payload_preview(content: bytes) -> dict[str, Any] | None:
         try:
             return {"encoding": "text", "value": sample.decode("utf-8")}
         except UnicodeDecodeError:
-            pass
+            return binary_preview(sample)
+    return binary_preview(sample)
+
+
+def binary_preview(sample: bytes) -> PayloadPreview:
     return {"encoding": "base64", "value": base64.b64encode(sample).decode("ascii")}
-
-
-def json_safe(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(k): json_safe(v) for k, v in value.items()}
-    if isinstance(value, list | tuple):
-        return [json_safe(v) for v in value]
-    if isinstance(value, bytes):
-        return base64.b64encode(value).decode("ascii")
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    return str(value)

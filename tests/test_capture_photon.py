@@ -3,7 +3,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from capture_photon import build_photon_summary, classify_photon_packet
+from vrchat_net_capture.capture_photon import build_photon_summary, classify_photon_packet
 
 
 class CapturePhotonTests(unittest.TestCase):
@@ -18,12 +18,16 @@ class CapturePhotonTests(unittest.TestCase):
         photon = classify_photon_packet(event, payload)
 
         self.assertIsNotNone(photon)
-        assert photon is not None
+        if photon is None:
+            self.fail("Expected a Photon candidate")
         self.assertEqual(photon["confidence"], "medium")
         self.assertEqual(photon["ports"], [27002])
         self.assertEqual(photon["capture_semantics"], "proxy_observed")
         self.assertEqual(photon["payload_semantics"], "not decoded")
-        self.assertEqual(photon["header_guess"]["command_count"], 1)
+        header = photon["header_guess"]
+        if header is None:
+            self.fail("Expected an ENet header")
+        self.assertEqual(header["command_count"], 1)
 
     def test_classifies_realtime_27002_port(self) -> None:
         event = {
@@ -37,7 +41,8 @@ class CapturePhotonTests(unittest.TestCase):
         photon = classify_photon_packet(event, payload)
 
         self.assertIsNotNone(photon)
-        assert photon is not None
+        if photon is None:
+            self.fail("Expected a Photon candidate")
         self.assertEqual(photon["ports"], [27002])
         self.assertEqual(photon["capture_semantics"], "wire_copy")
 

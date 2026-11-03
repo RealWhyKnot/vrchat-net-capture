@@ -1,18 +1,30 @@
+#!/usr/bin/env pwsh
+[CmdletBinding()]
 param(
-    [string]$Version = "",
+    [string]$Version = '',
     [switch]$Package,
     [switch]$SkipZip,
-    [string]$ArtifactsDir = ""
+    [string]$ArtifactsDir = ''
 )
 
-$ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 
-try { & git config --local core.hooksPath .githooks 2>$null } catch {}
+function Get-ManifestLine {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([System.IO.FileInfo[]] $Files, [string] $BuildDirectory)
+    foreach ($file in $Files) {
+        $relativePath = $file.FullName.Substring($BuildDirectory.Length + 1) -replace '\\', '/'
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        "$hash`t$($file.Length)`t$relativePath"
+    }
+}
 
-$BuildDir = Join-Path $PSScriptRoot "dist"
-$BuildCapturesDir = Join-Path $BuildDir "captures"
-$StateFile = Join-Path $PSScriptRoot ".local_build_state.json"
+Set-Location -LiteralPath $PSScriptRoot
+$BuildDir = Join-Path -Path $PSScriptRoot -ChildPath 'dist'
+$BuildCapturesDir = Join-Path -Path $BuildDir -ChildPath 'captures'
+$StateFile = Join-Path -Path $PSScriptRoot -ChildPath '.local_build_state.json'
 $CreatePackage = $Package -and -not $SkipZip
 
 if ($Version) {
@@ -20,92 +32,104 @@ if ($Version) {
         throw "Invalid -Version '$Version'. Expected YYYY.M.D.N, YYYY.M.D.N-XXXX, or YYYY.M.D.N-beta."
     }
     $FullVersion = $Version
-}
-else {
-    $Today = Get-Date -Format "yyyy.M.d"
+} else {
+    $Today = Get-Date -Format 'yyyy.M.d'
     $BuildCount = 0
-    if (Test-Path $StateFile) {
-        $State = Get-Content $StateFile | ConvertFrom-Json
-        if ($State.Date -eq $Today) { $BuildCount = [int]$State.Count + 1 }
+    if (Test-Path -LiteralPath $StateFile) {
+        $State = [IO.File]::ReadAllText($StateFile) | ConvertFrom-Json
+        if ($null -ne $State) {
+            $stateDate = $State.PSObject.Properties['Date']
+            $stateCount = $State.PSObject.Properties['Count']
+            if ($stateDate -and $stateDate.Value -eq $Today) {
+                $previousCount = if ($stateCount) { [int]$stateCount.Value } else { 0 }
+                $BuildCount = $previousCount + 1
+            }
+        }
     }
     $UID = [Guid]::NewGuid().ToString().Substring(0, 4).ToUpper()
     $FullVersion = "$Today.$BuildCount-$UID"
-    @{ Date = $Today; Count = $BuildCount } | ConvertTo-Json | Out-File $StateFile -Encoding utf8
+    $stateJson = @{ Date = $Today; Count = $BuildCount } | ConvertTo-Json -Depth 2
+    [IO.File]::WriteAllText($StateFile, $stateJson)
 }
 
 $AsmVersion = ($FullVersion -split '-')[0]
-$VersionFile = Join-Path $PSScriptRoot "version.txt"
+$VersionFile = Join-Path -Path $PSScriptRoot -ChildPath 'version.txt'
 [System.IO.File]::WriteAllText($VersionFile, $FullVersion, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Building Version: $FullVersion" -ForegroundColor Cyan
 
-if (Test-Path $BuildDir) {
-    Get-ChildItem -LiteralPath $BuildDir -Force |
-        Where-Object { $_.Name -ne "captures" } |
-        Remove-Item -Recurse -Force
+if (Test-Path -LiteralPath $BuildDir) {
+    $buildFiles = @(Get-ChildItem -LiteralPath $BuildDir -Force | Where-Object { $_.Name -ne 'captures' })
+    foreach ($buildFile in $buildFiles) {
+        Remove-Item -LiteralPath $buildFile.FullName -Recurse -Force
+    }
 }
-New-Item -ItemType Directory $BuildDir -Force | Out-Null
+$null = New-Item -ItemType Directory -Path $BuildDir -Force
 
 Write-Host "`n--- Publishing ---" -ForegroundColor Cyan
 $PubArgs = @(
-    "-c", "Release",
-    "-r", "win-x64",
-    "--self-contained", "true",
+    '-c', 'Release',
+    '-r', 'win-x64',
+    '--self-contained', 'true',
     "/p:Version=$AsmVersion",
-    "/p:PublishSingleFile=true",
-    "-o", $BuildDir,
-    "--nologo"
+    '/p:PublishSingleFile=true',
+    '-o', $BuildDir,
+    '--nologo'
 )
-dotnet publish "src/VRChatNetCapture/VRChatNetCapture.csproj" @PubArgs
-if ($LASTEXITCODE -ne 0) { throw "VRChatNetCapture publish failed" }
+dotnet publish 'src/VRChatNetCapture/VRChatNetCapture.csproj' @PubArgs
+if ($LASTEXITCODE -ne 0) { throw 'VRChatNetCapture publish failed' }
 
-$NativeBuildDir = Join-Path $PSScriptRoot "src\VRChatNetCapture\bin\Release\net10.0-windows\win-x64"
-foreach ($file in @("WinDivert.dll", "WinDivert64.sys")) {
-    $nativePath = Join-Path $NativeBuildDir $file
+$NativeBuildDir = Join-Path -Path $PSScriptRoot -ChildPath 'src\VRChatNetCapture\bin\Release\net10.0\win-x64'
+foreach ($file in @('WinDivert.dll', 'WinDivert64.sys')) {
+    $nativePath = Join-Path -Path $NativeBuildDir -ChildPath $file
     if (-not (Test-Path -LiteralPath $nativePath)) {
         throw "Missing native packet capture dependency: $nativePath"
     }
-    Copy-Item $nativePath (Join-Path $BuildDir $file) -Force
+    Copy-Item -LiteralPath $nativePath -Destination (Join-Path -Path $BuildDir -ChildPath $file) -Force
 }
 
-foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD-PARTY-WinDivert-LICENSE.txt", "version.txt")) {
-    Copy-Item (Join-Path $PSScriptRoot $file) (Join-Path $BuildDir $file) -Force
+$releaseDocuments = @(
+    'README.md', 'CHANGELOG.md', 'LICENSE', 'NOTICE', 'THIRD-PARTY-WinDivert-LICENSE.txt', 'version.txt'
+)
+foreach ($file in $releaseDocuments) {
+    $sourcePath = Join-Path -Path $PSScriptRoot -ChildPath $file
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path -Path $BuildDir -ChildPath $file) -Force
 }
 
-Get-ChildItem $BuildDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+foreach ($symbols in @(Get-ChildItem -LiteralPath $BuildDir -Filter '*.pdb' -Recurse)) {
+    Remove-Item -LiteralPath $symbols.FullName -Force -ErrorAction SilentlyContinue
+}
 
-$InstallManifestPath = Join-Path $BuildDir "release-manifest.tsv"
-$InstallManifestLines = Get-ChildItem $BuildDir -Recurse -File |
-    Where-Object { $_.FullName -ne $InstallManifestPath -and -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase) } |
-    Sort-Object FullName |
-    ForEach-Object {
-        $relPath = $_.FullName.Substring($BuildDir.Length + 1) -replace '\\', '/'
-        $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-        "$sha`t$($_.Length)`t$relPath"
-    }
-[System.IO.File]::WriteAllLines($InstallManifestPath, [string[]]$InstallManifestLines, [System.Text.UTF8Encoding]::new($false))
+$InstallManifestPath = Join-Path -Path $BuildDir -ChildPath 'release-manifest.tsv'
+$installFiles = @(Get-ChildItem -LiteralPath $BuildDir -Recurse -File |
+        Where-Object {
+            $_.FullName -ne $InstallManifestPath -and
+            -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase)
+        } | Sort-Object -Property FullName)
+$InstallManifestLines = @(Get-ManifestLine -Files $installFiles -BuildDirectory $BuildDir)
+[IO.File]::WriteAllLines($InstallManifestPath, [string[]]$InstallManifestLines, [Text.UTF8Encoding]::new($false))
 
 if ($CreatePackage) {
     $ArtifactRoot = if ($ArtifactsDir) { $ArtifactsDir } else { $BuildDir }
     if (-not [System.IO.Path]::IsPathRooted($ArtifactRoot)) {
-        $ArtifactRoot = Join-Path $PSScriptRoot $ArtifactRoot
+        $ArtifactRoot = Join-Path -Path $PSScriptRoot -ChildPath $ArtifactRoot
     }
-    if (-not (Test-Path $ArtifactRoot)) { New-Item -ItemType Directory $ArtifactRoot -Force | Out-Null }
-
-    $ManifestPath = Join-Path $ArtifactRoot "VRChatNetCapture-v$FullVersion.manifest.tsv"
-    $ZipPath = Join-Path $ArtifactRoot "VRChatNetCapture-v$FullVersion.zip"
-    if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
-
-    $PackageFiles = Get-ChildItem $BuildDir -Recurse -File |
-        Where-Object { -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase) } |
-        Sort-Object FullName
-    $manifestLines = $PackageFiles | ForEach-Object {
-        $relPath = $_.FullName.Substring($BuildDir.Length + 1) -replace '\\', '/'
-        $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-        "$sha`t$($_.Length)`t$relPath"
+    if (-not (Test-Path -LiteralPath $ArtifactRoot)) {
+        $null = New-Item -ItemType Directory -Path $ArtifactRoot -Force
     }
-    $PackageInputs = Get-ChildItem $BuildDir -Force |
-        Where-Object { $_.Name -ne "captures" } |
-        ForEach-Object { $_.FullName }
+
+    $ManifestPath = Join-Path -Path $ArtifactRoot -ChildPath "VRChatNetCapture-v$FullVersion.manifest.tsv"
+    $ZipPath = Join-Path -Path $ArtifactRoot -ChildPath "VRChatNetCapture-v$FullVersion.zip"
+    if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+
+    $PackageFiles = @(Get-ChildItem -LiteralPath $BuildDir -Recurse -File |
+            Where-Object {
+                -not $_.FullName.StartsWith($BuildCapturesDir, [System.StringComparison]::OrdinalIgnoreCase)
+            } |
+            Sort-Object -Property FullName)
+    $manifestLines = @(Get-ManifestLine -Files $PackageFiles -BuildDirectory $BuildDir)
+    $PackageInputs = @(foreach ($file in @(Get-ChildItem -LiteralPath $BuildDir -Force)) {
+            if ($file.Name -ne 'captures') { $file.FullName }
+        })
     [System.IO.File]::WriteAllLines($ManifestPath, [string[]]$manifestLines, [System.Text.UTF8Encoding]::new($false))
     Write-Host "Manifest: $ManifestPath ($($manifestLines.Count) files)" -ForegroundColor Cyan
 
@@ -114,3 +138,5 @@ if ($CreatePackage) {
 }
 
 Write-Host "`nBuild complete: v$FullVersion" -ForegroundColor Green
+
+exit 0

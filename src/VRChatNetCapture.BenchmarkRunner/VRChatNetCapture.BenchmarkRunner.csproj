@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../benchmarks/VRChatNetCapture.Benchmarks/VRChatNetCapture.Benchmarks.csproj" />
+    <Compile Include="../VRChatNetCapture/CaptureLog.cs" Link="CaptureLog.cs" />
+  </ItemGroup>
+</Project>

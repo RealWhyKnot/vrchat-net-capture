@@ -4,12 +4,15 @@ import ctypes
 import functools
 import socket
 import struct
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
 
 DEFAULT_CAPTURE_PROCESSES = "VRChat.exe"
 MAX_ANCESTOR_DEPTH = 16
+MIN_ADDRESS_PARTS = 2
 
 _AF_INET = 2
 _TCP_TABLE_OWNER_PID_ALL = 5
@@ -33,14 +36,16 @@ def parse_process_names(value: str) -> frozenset[str]:
     return frozenset(name.strip().lower() for name in (value or "").split(",") if name.strip())
 
 
-def socket_address(value: Any) -> Address | None:
-    if not isinstance(value, (tuple, list)) or len(value) < 2:
+def socket_address(value: object) -> Address | None:
+    if not isinstance(value, (tuple, list)):
         return None
-    host, port = value[0], value[1]
+    parts = cast("Sequence[object]", value)
+    if len(parts) < MIN_ADDRESS_PARTS:
+        return None
+    host, port = parts[0], parts[1]
     if not isinstance(host, str) or not isinstance(port, int):
         return None
-    if host.startswith("::ffff:"):
-        host = host[7:]
+    host = host.removeprefix("::ffff:")
     return host, port
 
 
@@ -60,7 +65,7 @@ def find_owner_pid(table: bytes, client: Address, proxy: Address) -> int | None:
             and row_remote == remote_addr
             and row_remote_port[:2] == remote_port
         ):
-            return pid
+            return cast("int", pid)
     return None
 
 
@@ -109,26 +114,30 @@ class CaptureProcessFilter:
         if client is None or proxy is None or not self.names:
             return False
         try:
-            table = self._table()
-            if table is None:
-                return False
-            pid = find_owner_pid(table, client, proxy)
-            if pid is None:
-                return False
-            started = self._created(pid)
-            if started is not None and (pid, started) in self._decisions:
-                return self._decisions[(pid, started)]
-            snapshot = self._processes()
-            if snapshot is None:
-                return False
-            decision = is_capture_process(pid, snapshot, self._created, self.names)
-            if started is not None:
-                if len(self._decisions) >= _MAX_CACHED_DECISIONS:
-                    self._decisions.clear()
-                self._decisions[(pid, started)] = decision
-            return decision
-        except Exception:
+            decision = self._lookup(client, proxy)
+        except (OSError, ValueError, OverflowError, struct.error):
             return False
+        return decision
+
+    def _lookup(self, client: Address, proxy: Address) -> bool:
+        table = self._table()
+        if table is None:
+            return False
+        pid = find_owner_pid(table, client, proxy)
+        if pid is None:
+            return False
+        started = self._created(pid)
+        if started is not None and (pid, started) in self._decisions:
+            return self._decisions[pid, started]
+        snapshot = self._processes()
+        if snapshot is None:
+            return False
+        decision = is_capture_process(pid, snapshot, self._created, self.names)
+        if started is not None:
+            if len(self._decisions) >= _MAX_CACHED_DECISIONS:
+                self._decisions.clear()
+            self._decisions[pid, started] = decision
+        return decision
 
 
 def tcp4_table() -> bytes | None:
@@ -156,18 +165,23 @@ def tcp4_table() -> bytes | None:
     return None
 
 
-class _ProcessEntry32(ctypes.Structure):
+class ProcessEntryNative(ctypes.Structure):
+    size: int
+    process_id: int
+    parent_process_id: int
+    executable_name: str
+
     _fields_ = [
-        ("dwSize", ctypes.c_ulong),
-        ("cntUsage", ctypes.c_ulong),
-        ("th32ProcessID", ctypes.c_ulong),
-        ("th32DefaultHeapID", ctypes.c_size_t),
-        ("th32ModuleID", ctypes.c_ulong),
-        ("cntThreads", ctypes.c_ulong),
-        ("th32ParentProcessID", ctypes.c_ulong),
-        ("pcPriClassBase", ctypes.c_long),
-        ("dwFlags", ctypes.c_ulong),
-        ("szExeFile", ctypes.c_wchar * 260),
+        ("size", ctypes.c_ulong),
+        ("usage_count", ctypes.c_ulong),
+        ("process_id", ctypes.c_ulong),
+        ("default_heap_id", ctypes.c_size_t),
+        ("module_id", ctypes.c_ulong),
+        ("thread_count", ctypes.c_ulong),
+        ("parent_process_id", ctypes.c_ulong),
+        ("base_priority", ctypes.c_long),
+        ("flags", ctypes.c_ulong),
+        ("executable_name", ctypes.c_wchar * 260),
     ]
 
 
@@ -179,13 +193,13 @@ def process_snapshot() -> dict[int, ProcessEntry] | None:
     if not handle or handle == ctypes.c_void_p(-1).value:
         return None
     try:
-        entry = _ProcessEntry32()
-        entry.dwSize = ctypes.sizeof(_ProcessEntry32)
+        entry = ProcessEntryNative()
+        entry.size = ctypes.sizeof(ProcessEntryNative)
         processes: dict[int, ProcessEntry] = {}
         more = kernel32.Process32FirstW(handle, ctypes.byref(entry))
         while more:
-            pid = int(entry.th32ProcessID)
-            processes[pid] = ProcessEntry(pid, int(entry.th32ParentProcessID), entry.szExeFile)
+            pid = int(entry.process_id)
+            processes[pid] = ProcessEntry(pid, int(entry.parent_process_id), entry.executable_name)
             more = kernel32.Process32NextW(handle, ctypes.byref(entry))
         return processes
     finally:
@@ -196,7 +210,7 @@ def process_created(pid: int) -> int | None:
     kernel32 = _kernel32()
     if kernel32 is None:
         return None
-    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
     if not handle:
         return None
     try:
@@ -208,26 +222,26 @@ def process_created(pid: int) -> int | None:
 
 
 @functools.cache
-def _windll(name: str) -> Any | None:
-    loader = getattr(ctypes, "WinDLL", None)
-    if loader is None:
+def _windll(name: str) -> ctypes.CDLL | None:
+    if not hasattr(ctypes, "WinDLL"):
         return None
     try:
-        return loader(name, use_last_error=True)
+        library = ctypes.WinDLL(name, use_last_error=True)
     except OSError:
         return None
+    return library
 
 
 @functools.cache
-def _kernel32() -> Any | None:
+def _kernel32() -> ctypes.CDLL | None:
     kernel32 = _windll("kernel32")
     if kernel32 is None:
         return None
     kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_ulong, ctypes.c_ulong]
     kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
-    kernel32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_ProcessEntry32)]
+    kernel32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ProcessEntryNative)]
     kernel32.Process32FirstW.restype = ctypes.c_int
-    kernel32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_ProcessEntry32)]
+    kernel32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ProcessEntryNative)]
     kernel32.Process32NextW.restype = ctypes.c_int
     kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
     kernel32.OpenProcess.restype = ctypes.c_void_p

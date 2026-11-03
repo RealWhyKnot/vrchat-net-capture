@@ -179,9 +179,23 @@ mitmproxy dump files aren't written at all.
 
 ## Development
 
+Install development dependencies:
+
+```powershell
+uv sync --frozen
+```
+
+Run the full gate with shell checks in your WSL distro:
+
+```powershell
+$env:LINT_WSL_DISTRO = 'Ubuntu'
+bash .githooks/pre-push
+```
+
+Format or build:
+
 ```powershell
 .\.github\lint\format.ps1
-.\.github\lint\lint.ps1
 .\build.ps1
 .\build.ps1 -Package
 ```

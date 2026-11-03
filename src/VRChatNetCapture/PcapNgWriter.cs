@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace VRChatNetCapture;
 
-public sealed class PcapNgWriter : IDisposable
+internal sealed class PcapNgWriter : IDisposable
 {
     private const uint SectionHeaderBlock = 0x0A0D0D0A;
     private const uint InterfaceDescriptionBlock = 0x00000001;
@@ -19,13 +19,13 @@ public sealed class PcapNgWriter : IDisposable
 
     public void WritePacket(ReadOnlySpan<byte> packet, DateTimeOffset timestamp)
     {
-        var paddedLength = Align4(packet.Length);
-        var blockLength = 32 + paddedLength;
+        int paddedLength = Align4(packet.Length);
+        int blockLength = 32 + paddedLength;
         Span<byte> header = stackalloc byte[28];
         WriteUInt32(header[0..4], EnhancedPacketBlock);
         WriteUInt32(header[4..8], (uint)blockLength);
         WriteUInt32(header[8..12], 0);
-        var micros = timestamp.ToUnixTimeMilliseconds() * 1000L + (timestamp.Ticks % TimeSpan.TicksPerMillisecond) / 10L;
+        long micros = (timestamp.ToUnixTimeMilliseconds() * 1000L) + (timestamp.Ticks % TimeSpan.TicksPerMillisecond / 10L);
         WriteUInt32(header[12..16], (uint)(micros >> 32));
         WriteUInt32(header[16..20], (uint)(micros & 0xFFFFFFFF));
         WriteUInt32(header[20..24], (uint)packet.Length);
@@ -68,7 +68,7 @@ public sealed class PcapNgWriter : IDisposable
 
     private void WritePadding(int length)
     {
-        var pad = Align4(length) - length;
+        int pad = Align4(length) - length;
         if (pad == 0)
         {
             return;

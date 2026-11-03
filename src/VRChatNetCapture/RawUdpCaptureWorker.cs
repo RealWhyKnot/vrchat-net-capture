@@ -1,17 +1,14 @@
-using System.Text.Json;
-
 namespace VRChatNetCapture;
 
-public static class RawUdpCaptureWorker
+internal static class RawUdpCaptureWorker
 {
     private const int MaxPacketSize = 0xFFFF;
-    private const int AddressSize = 80;
 
     public static async Task<int> RunAsync(RawUdpCaptureOptions options, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(options.CaptureDir);
-        var networkDir = Path.Combine(options.CaptureDir, "network");
-        var payloadDir = Path.Combine(networkDir, "payloads");
+        string networkDir = Path.Combine(options.CaptureDir, "network");
+        string payloadDir = Path.Combine(networkDir, "payloads");
         Directory.CreateDirectory(networkDir);
         Directory.CreateDirectory(payloadDir);
 
@@ -22,48 +19,83 @@ public static class RawUdpCaptureWorker
         };
         try
         {
-            var ports = RawUdpCaptureOptions.ParsePorts(options.Ports);
-            var filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
-            await log.WriteLineAsync($"filter={filter}").ConfigureAwait(false);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var parentWatch = WatchParentAsync(options.ParentPid, options.StopFile, ports, log, linkedCts.Token);
-
-            var handle = WinDivertNative.WinDivertOpen(
-                filter,
-                WinDivertNative.LayerNetwork,
-                0,
-                WinDivertNative.FlagSniff | WinDivertNative.FlagRecvOnly);
-            if (handle == WinDivertNative.InvalidHandle)
-            {
-                throw WinDivertNative.LastError("WinDivertOpen failed");
-            }
-
-            try
-            {
-                await CaptureLoopAsync(handle, networkDir, payloadDir, ports, options.StopFile, linkedCts.Token)
-                    .ConfigureAwait(false);
-            }
-            finally
-            {
-                await linkedCts.CancelAsync().ConfigureAwait(false);
-                await parentWatch.ConfigureAwait(false);
-                _ = WinDivertNative.WinDivertClose(handle);
-            }
+            await RunCaptureAsync(options, networkDir, payloadDir, log, cancellationToken).ConfigureAwait(false);
             return 0;
         }
-        catch (Exception ex)
+        catch (DllNotFoundException ex)
         {
-            await log.WriteLineAsync(ex.ToString()).ConfigureAwait(false);
-            JsonFiles.Write(
-                Path.Combine(networkDir, "raw-udp-error.json"),
-                new
-                {
-                    schema_version = 1,
-                    error = ex.Message,
-                    detail = ex.GetType().FullName,
-                });
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
             return 1;
         }
+        catch (EntryPointNotFoundException ex)
+        {
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+        catch (BadImageFormatException ex)
+        {
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await WriteErrorAsync(log, networkDir, ex, cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+    }
+
+    private static async Task RunCaptureAsync(RawUdpCaptureOptions options, string networkDir, string payloadDir, StreamWriter log, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<int> ports = RawUdpCaptureOptions.ParsePorts(options.Ports);
+        string filter = RawUdpCaptureOptions.BuildWinDivertFilter(ports);
+        await log.WriteLineAsync($"filter={filter}").ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        nint handle = WinDivertNative.WinDivertOpen(
+            filter,
+            WinDivertNative.LayerNetwork,
+            0,
+            WinDivertNative.FlagSniff | WinDivertNative.FlagRecvOnly);
+        if (handle == WinDivertNative.InvalidHandle)
+        {
+            throw WinDivertNative.LastError("WinDivertOpen failed");
+        }
+
+        Task parentWatch = WatchParentAsync(options.ParentPid, options.StopFile, ports, log, linkedCts.Token);
+        try
+        {
+            await CaptureLoopAsync(handle, networkDir, payloadDir, ports, options.StopFile, linkedCts.Token)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            await linkedCts.CancelAsync().ConfigureAwait(false);
+            await parentWatch.ConfigureAwait(false);
+            _ = WinDivertNative.WinDivertClose(handle);
+        }
+    }
+
+    private static async Task WriteErrorAsync(StreamWriter log, string networkDir, Exception ex, CancellationToken cancellationToken)
+    {
+        await log.WriteLineAsync(ex.ToString().AsMemory(), cancellationToken).ConfigureAwait(false);
+        JsonFiles.Write(
+            Path.Combine(networkDir, "raw-udp-error.json"),
+            new
+            {
+                schema_version = 1,
+                error = ex.Message,
+                detail = ex.GetType().FullName,
+            });
     }
 
     private static async Task CaptureLoopAsync(
@@ -74,9 +106,43 @@ public static class RawUdpCaptureWorker
         string stopFile,
         CancellationToken cancellationToken)
     {
-        var packetPath = Path.Combine(networkDir, "realtime-udp.pcapng");
-        var indexPath = Path.Combine(networkDir, "packet-index.jsonl");
-        var datagramPath = Path.Combine(networkDir, "udp-datagrams.jsonl");
+        string packetPath = Path.Combine(networkDir, "realtime-udp.pcapng");
+        WriteManifest(networkDir, ports);
+
+        using var buffers = new CapturePacketBuffers();
+        using var pcap = new PcapNgWriter(packetPath);
+        await using var sink = new RawUdpPacketSink(networkDir, payloadDir);
+
+        long packetNumber = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (File.Exists(stopFile))
+            {
+                break;
+            }
+            if (!WinDivertNative.WinDivertRecv(handle, buffers.Packet, MaxPacketSize, out uint receivedLength, buffers.Address))
+            {
+                throw WinDivertNative.LastError("WinDivertRecv failed");
+            }
+            if (File.Exists(stopFile))
+            {
+                break;
+            }
+            DateTimeOffset timestamp = DateTimeOffset.UtcNow;
+            Memory<byte> packet = buffers.Packet.AsMemory(0, (int)receivedLength);
+            if (UdpPacketParser.TryParse(packet.Span) is not { } udp)
+            {
+                continue;
+            }
+            packetNumber++;
+            pcap.WritePacket(packet.Span, timestamp);
+            var address = WinDivertAddressInfo.FromBuffer(buffers.Address);
+            await sink.WriteAsync(packet, udp, address, packetNumber, timestamp, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static void WriteManifest(string networkDir, IReadOnlyList<int> ports)
+    {
         JsonFiles.Write(
             Path.Combine(networkDir, "raw-udp-manifest.json"),
             new
@@ -87,76 +153,6 @@ public static class RawUdpCaptureWorker
                 filter_ports = ports,
                 started_at = DateTimeOffset.UtcNow.ToString("O"),
             });
-
-        var packetBuffer = new byte[MaxPacketSize];
-        var addressBuffer = new byte[AddressSize];
-        using var pcap = new PcapNgWriter(packetPath);
-        await using var indexWriter = new StreamWriter(new FileStream(indexPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-        {
-            AutoFlush = true,
-        };
-        await using var datagramWriter = new StreamWriter(new FileStream(datagramPath, FileMode.Create, FileAccess.Write, FileShare.Read))
-        {
-            AutoFlush = true,
-        };
-
-        long packetNumber = 0;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            if (File.Exists(stopFile))
-            {
-                break;
-            }
-            if (!WinDivertNative.WinDivertRecv(handle, packetBuffer, (uint)packetBuffer.Length, out var recvLen, addressBuffer))
-            {
-                throw WinDivertNative.LastError("WinDivertRecv failed");
-            }
-            if (File.Exists(stopFile))
-            {
-                break;
-            }
-            var timestamp = DateTimeOffset.UtcNow;
-            var packet = packetBuffer.AsSpan(0, (int)recvLen);
-            var udp = UdpPacketParser.TryParse(packet);
-            if (udp is null)
-            {
-                continue;
-            }
-            packetNumber++;
-            pcap.WritePacket(packet, timestamp);
-            var payload = packet.Slice(udp.PayloadOffset, udp.PayloadLength);
-            var payloadPath = Path.Combine(payloadDir, udp.PayloadSha256 + ".udp.bin");
-            if (!File.Exists(payloadPath))
-            {
-                await File.WriteAllBytesAsync(payloadPath, payload.ToArray(), cancellationToken).ConfigureAwait(false);
-            }
-
-            var address = WinDivertAddressInfo.FromBuffer(addressBuffer);
-            var index = new RawUdpPacketIndex
-            {
-                PacketNumber = packetNumber,
-                TsUtc = timestamp.ToString("O"),
-                CaptureSemantics = "wire_copy",
-                Backend = "WinDivert",
-                IpVersion = udp.IpVersion,
-                SourceAddress = udp.SourceAddress,
-                DestinationAddress = udp.DestinationAddress,
-                SourcePort = udp.SourcePort,
-                DestinationPort = udp.DestinationPort,
-                CapturedLength = (int)recvLen,
-                PayloadLength = udp.PayloadLength,
-                PayloadSha256 = udp.PayloadSha256,
-                PayloadPath = $"network/payloads/{udp.PayloadSha256}.udp.bin",
-                Direction = address.Outbound ? "outbound" : "inbound",
-                Loopback = address.Loopback,
-                InterfaceIndex = address.InterfaceIndex,
-                ProcessId = null,
-                PidConfidence = "none",
-            };
-            var json = JsonSerializer.Serialize(index, JsonFiles.JsonLineOptions);
-            await indexWriter.WriteLineAsync(json).ConfigureAwait(false);
-            await datagramWriter.WriteLineAsync(json).ConfigureAwait(false);
-        }
     }
 
     private static Task WatchParentAsync(
@@ -166,12 +162,9 @@ public static class RawUdpCaptureWorker
         StreamWriter log,
         CancellationToken cancellationToken)
     {
-        if (parentPid is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        return Task.Run(
+        return parentPid is null
+            ? Task.CompletedTask
+            : Task.Run(
             async () =>
             {
                 try
@@ -183,8 +176,13 @@ public static class RawUdpCaptureWorker
                 {
                     return;
                 }
-                catch
+                catch (ArgumentException ex)
                 {
+                    CaptureLog.Debug(ex);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    CaptureLog.Debug(ex);
                 }
 
                 if (cancellationToken.IsCancellationRequested)
@@ -204,59 +202,36 @@ public static class RawUdpCaptureWorker
         {
             File.WriteAllText(stopFile, DateTimeOffset.UtcNow.ToString("O"));
         }
-        catch
+        catch (IOException ex)
         {
+            CaptureLog.Debug(ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            CaptureLog.Debug(ex);
+        }
+        catch (System.Net.Sockets.SocketException ex)
+        {
+            CaptureLog.Debug(ex);
         }
 
         try
         {
-            var port = ports.Contains(9001) ? 9001 : ports[0];
+            int port = ports.Contains(9001) ? 9001 : ports[0];
             using var udp = new System.Net.Sockets.UdpClient();
             udp.Send([0], 1, "127.0.0.1", port);
         }
-        catch
+        catch (IOException ex)
         {
+            CaptureLog.Debug(ex);
         }
-    }
-}
-
-public sealed class RawUdpPacketIndex
-{
-    public int SchemaVersion { get; set; } = 1;
-    public long PacketNumber { get; set; }
-    public string TsUtc { get; set; } = "";
-    public string CaptureSemantics { get; set; } = "wire_copy";
-    public string Backend { get; set; } = "WinDivert";
-    public int IpVersion { get; set; }
-    public string SourceAddress { get; set; } = "";
-    public string DestinationAddress { get; set; } = "";
-    public int SourcePort { get; set; }
-    public int DestinationPort { get; set; }
-    public int CapturedLength { get; set; }
-    public int PayloadLength { get; set; }
-    public string PayloadSha256 { get; set; } = "";
-    public string PayloadPath { get; set; } = "";
-    public string Direction { get; set; } = "unknown";
-    public bool Loopback { get; set; }
-    public uint InterfaceIndex { get; set; }
-    public int? ProcessId { get; set; }
-    public string PidConfidence { get; set; } = "none";
-}
-
-public sealed class WinDivertAddressInfo
-{
-    public bool Outbound { get; init; }
-    public bool Loopback { get; init; }
-    public uint InterfaceIndex { get; init; }
-
-    public static WinDivertAddressInfo FromBuffer(byte[] buffer)
-    {
-        var flags = BitConverter.ToUInt64(buffer, 8);
-        return new WinDivertAddressInfo
+        catch (UnauthorizedAccessException ex)
         {
-            Outbound = ((flags >> 17) & 1) != 0,
-            Loopback = ((flags >> 18) & 1) != 0,
-            InterfaceIndex = BitConverter.ToUInt32(buffer, 16),
-        };
+            CaptureLog.Debug(ex);
+        }
+        catch (System.Net.Sockets.SocketException ex)
+        {
+            CaptureLog.Debug(ex);
+        }
     }
 }

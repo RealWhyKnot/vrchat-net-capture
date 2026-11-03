@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
-from capture_osc import OscParseError, build_osc_summary, decode_osc_packet
-from capture_photon import build_photon_summary, classify_photon_packet
-from capture_utils import append_jsonl
+from vrchat_net_capture.capture_errors import configure_errors
+from vrchat_net_capture.capture_osc import OscPacket, OscParseError, build_osc_summary, decode_osc_packet
+from vrchat_net_capture.capture_photon import build_photon_summary, classify_photon_packet
+
+if TYPE_CHECKING:
+    from vrchat_net_capture.capture_schema import AnalysisRecord, OscFailure, RawDatagram
+from vrchat_net_capture.capture_utils import append_jsonl
+
+
+@dataclass
+class PostprocessOptions:
+    capture_dir: str = ""
+    decode_osc: bool = False
+    store_osc_values: bool = False
+    photon_metadata: bool = False
 
 
 def main() -> int:
@@ -16,7 +29,12 @@ def main() -> int:
     parser.add_argument("--decode-osc", action="store_true")
     parser.add_argument("--store-osc-values", action="store_true")
     parser.add_argument("--photon-metadata", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=PostprocessOptions())
+    configure_errors(Path(args.capture_dir))
+    return process_capture(args)
+
+
+def process_capture(args: PostprocessOptions) -> int:
 
     capture_dir = Path(args.capture_dir)
     datagrams_path = capture_dir / "network" / "udp-datagrams.jsonl"
@@ -25,8 +43,8 @@ def main() -> int:
 
     osc_dir = capture_dir / "osc"
     photon_dir = capture_dir / "photon"
-    osc_records: list[dict[str, Any]] = []
-    photon_records: list[dict[str, Any]] = []
+    osc_records: list[AnalysisRecord] = []
+    photon_records: list[AnalysisRecord] = []
 
     if args.decode_osc:
         osc_dir.mkdir(parents=True, exist_ok=True)
@@ -40,7 +58,7 @@ def main() -> int:
         payload = payload_path.read_bytes()
 
         if args.decode_osc:
-            record = osc_record(datagram, payload, args.store_osc_values)
+            record = osc_record(datagram, payload, store_values=args.store_osc_values)
             if record is not None:
                 osc_records.append(record)
                 append_jsonl(osc_dir / "osc-events.jsonl", record)
@@ -53,6 +71,17 @@ def main() -> int:
                 photon_records.append(record)
                 append_jsonl(photon_dir / "photon-packets.jsonl", record)
 
+    write_summaries(args, osc_dir, photon_dir, osc_records, photon_records)
+    return 0
+
+
+def write_summaries(
+    args: PostprocessOptions,
+    osc_dir: Path,
+    photon_dir: Path,
+    osc_records: list[AnalysisRecord],
+    photon_records: list[AnalysisRecord],
+) -> None:
     if args.decode_osc:
         (osc_dir / "osc-summary.json").write_text(
             json.dumps(build_osc_summary(osc_records), indent=2), encoding="utf-8"
@@ -62,10 +91,10 @@ def main() -> int:
             json.dumps(build_photon_summary(photon_records), indent=2),
             encoding="utf-8",
         )
-    return 0
 
 
-def osc_record(datagram: dict[str, Any], payload: bytes, store_values: bool) -> dict[str, Any] | None:
+def osc_record(datagram: RawDatagram, payload: bytes, *, store_values: bool) -> AnalysisRecord | None:
+    osc: OscPacket | OscFailure | None
     try:
         osc = decode_osc_packet(payload, include_values=store_values)
         if osc is None:
@@ -77,7 +106,7 @@ def osc_record(datagram: dict[str, Any], payload: bytes, store_values: bool) -> 
     return record
 
 
-def base_record(kind: str, datagram: dict[str, Any]) -> dict[str, Any]:
+def base_record(kind: str, datagram: RawDatagram) -> AnalysisRecord:
     return {
         "kind": kind,
         "schema_version": 1,
@@ -102,24 +131,24 @@ def base_record(kind: str, datagram: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+def read_jsonl(path: Path) -> list[RawDatagram]:
+    records: list[RawDatagram] = []
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
+        for raw_line in handle:
+            line = raw_line.strip()
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
+                records.append(cast("RawDatagram", json.loads(line)))
             except json.JSONDecodeError:
                 return read_json_stream(path)
     return records
 
 
-def read_json_stream(path: Path) -> list[dict[str, Any]]:
+def read_json_stream(path: Path) -> list[RawDatagram]:
     text = path.read_text(encoding="utf-8")
     decoder = json.JSONDecoder()
-    records: list[dict[str, Any]] = []
+    records: list[RawDatagram] = []
     index = 0
     while index < len(text):
         while index < len(text) and text[index].isspace():
@@ -128,7 +157,7 @@ def read_json_stream(path: Path) -> list[dict[str, Any]]:
             break
         record, index = decoder.raw_decode(text, index)
         if isinstance(record, dict):
-            records.append(record)
+            records.append(cast("RawDatagram", record))
     return records
 
 

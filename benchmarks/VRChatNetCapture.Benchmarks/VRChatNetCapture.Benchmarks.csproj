@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <Compile Include="../../tests/VRChatNetCapture.Tests/Reference*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../tests/VRChatNetCapture.Tests/SyntheticPacket.cs" Link="SyntheticPacket.cs" />
+    <Compile Include="../../src/VRChatNetCapture/UdpPacket*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../src/VRChatNetCapture/WinDivertAddressInfo.cs" Link="WinDivertAddressInfo.cs" />
+    <Compile Include="../../src/VRChatNetCapture/Packet*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../src/VRChatNetCapture/JsonFiles.cs" Link="JsonFiles.cs" />
+  </ItemGroup>
+</Project>

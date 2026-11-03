@@ -1,127 +1,80 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from capture_events import (
+from typing_extensions import override
+
+from tests.flow_fixtures import client, make_flow, make_http_flow, stream_flow
+from vrchat_net_capture.capture_events import (
     build_summary,
     request_headers_event,
     response_headers_event,
     stream_event,
     websocket_event,
 )
-from capture_records import REDACTED
-
-
-class Dummy:
-    pass
-
-
-class Headers:
-    def __init__(self, items: list[tuple[str, str]]) -> None:
-        self._items = items
-
-    def items(self) -> list[tuple[str, str]]:
-        return list(self._items)
-
-
-def make_http_flow():
-    flow = Dummy()
-    flow.id = "flow-2"
-    flow.client_conn = None
-    flow.server_conn = None
-
-    req = Dummy()
-    req.pretty_host = "worlds.example.test"
-    req.pretty_url = "https://worlds.example.test/do_auth?authToken=secret-token&lang=en"
-    req.method = "GET"
-    req.path = "/do_auth?authToken=secret-token&lang=en"
-    req.scheme = "https"
-    req.http_version = "HTTP/1.1"
-    req.headers = Headers(
-        [
-            ("Authorization", "Bearer secret"),
-            ("Cookie", "auth=secret"),
-            ("X-Auth-Token", "secret"),
-            ("Accept", "application/json"),
-        ]
-    )
-    flow.request = req
-
-    resp = Dummy()
-    resp.status_code = 200
-    resp.http_version = "HTTP/1.1"
-    resp.headers = Headers([("Set-Cookie", "auth=secret; Path=/"), ("Content-Type", "application/json")])
-    flow.response = resp
-    return flow
-
-
-def make_flow(message: bytes = b"hello", from_client: bool = True, is_text: bool = True):
-    flow = Dummy()
-    flow.id = "flow-1"
-    flow.client_conn = None
-    flow.server_conn = None
-
-    req = Dummy()
-    req.pretty_host = "pipeline.vrchat.cloud"
-    req.pretty_url = "wss://pipeline.vrchat.cloud/socket"
-    req.method = "GET"
-    req.path = "/socket"
-    flow.request = req
-
-    ws = Dummy()
-    msg = Dummy()
-    msg.content = message
-    msg.from_client = from_client
-    msg.is_text = is_text
-    msg.type = "TEXT" if is_text else "BINARY"
-    msg.timestamp = 1.0
-    msg.dropped = False
-    msg.injected = False
-    ws.messages = [msg]
-    flow.websocket = ws
-    flow.messages = [msg]
-    return flow
+from vrchat_net_capture.capture_records import REDACTED
 
 
 class CaptureEventsTests(unittest.TestCase):
+    @override
+    def setUp(self) -> None:
+        clock = patch("vrchat_net_capture.capture_events.time.time", return_value=1.0)
+        clock.start()
+        self.addCleanup(clock.stop)
+
     def test_websocket_event_summarizes_latest_message(self) -> None:
-        event, payload = websocket_event("websocket_message", make_flow())
+        result = websocket_event("websocket_message", make_flow())
+        event, payload = result.event, result.content
 
         self.assertEqual(payload, b"hello")
         self.assertEqual(event["kind"], "websocket_message")
-        self.assertEqual(event["host"], "pipeline.vrchat.cloud")
-        self.assertEqual(event["direction"], "client_to_server")
-        self.assertEqual(event["text_preview"], "hello")
-        self.assertEqual(event["size"], 5)
+        self.assertEqual(event.get("host"), "pipeline.vrchat.cloud")
+        self.assertEqual(event.get("direction"), "client_to_server")
+        self.assertEqual(event.get("text_preview"), "hello")
+        self.assertEqual(event.get("size"), 5)
 
     def test_stream_event_uses_base64_for_binary_preview(self) -> None:
-        event, payload = stream_event("tcp_message", make_flow(b"\x00\x01\x02", is_text=False))
+        result = stream_event("tcp_message", stream_flow(client(50001), b"\x00\x01\x02"))
+        event, payload = result.event, result.content
 
         self.assertEqual(payload, b"\x00\x01\x02")
-        self.assertEqual(event["preview"]["encoding"], "base64")
-        self.assertEqual(event["capture_semantics"], "proxy_observed")
+        preview = event.get("preview")
+        if preview is None:
+            self.fail("Expected a payload preview")
+        self.assertEqual(preview["encoding"], "base64")
+        self.assertEqual(event.get("capture_semantics"), "proxy_observed")
 
     def test_request_headers_event_redacts_credentials(self) -> None:
         event = request_headers_event(make_http_flow())
+        headers = event.get("headers")
+        if headers is None:
+            self.fail("Expected headers")
 
-        self.assertEqual(event["headers"]["Authorization"], REDACTED)
-        self.assertEqual(event["headers"]["Cookie"], REDACTED)
-        self.assertEqual(event["headers"]["X-Auth-Token"], REDACTED)
-        self.assertEqual(event["headers"]["Accept"], "application/json")
+        self.assertEqual(headers["Authorization"], REDACTED)
+        self.assertEqual(headers["Cookie"], REDACTED)
+        self.assertEqual(headers["X-Auth-Token"], REDACTED)
+        self.assertEqual(headers["Accept"], "application/json")
         self.assertNotIn("secret", str(event))
 
     def test_response_headers_event_redacts_set_cookie(self) -> None:
         event = response_headers_event(make_http_flow())
+        headers = event.get("headers")
+        if headers is None:
+            self.fail("Expected headers")
 
-        self.assertEqual(event["headers"]["Set-Cookie"], REDACTED)
-        self.assertEqual(event["headers"]["Content-Type"], "application/json")
+        self.assertEqual(headers["Set-Cookie"], REDACTED)
+        self.assertEqual(headers["Content-Type"], "application/json")
         self.assertNotIn("secret", str(event))
 
     def test_flow_events_redact_token_query_params(self) -> None:
         event = request_headers_event(make_http_flow())
+        headers = event.get("headers")
+        if headers is None:
+            self.fail("Expected headers")
 
-        self.assertEqual(event["url"], f"https://worlds.example.test/do_auth?authToken={REDACTED}&lang=en")
-        self.assertEqual(event["path"], f"/do_auth?authToken={REDACTED}&lang=en")
+        self.assertEqual(event.get("url"), f"https://worlds.example.test/do_auth?authToken={REDACTED}&lang=en")
+        self.assertEqual(event.get("path"), f"/do_auth?authToken={REDACTED}&lang=en")
 
     def test_build_summary_counts_flows_and_events(self) -> None:
         summary = build_summary(

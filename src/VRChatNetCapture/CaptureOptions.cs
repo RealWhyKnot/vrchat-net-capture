@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace VRChatNetCapture;
 
-public sealed class CaptureOptions
+internal sealed class CaptureOptions
 {
     public string Command { get; init; } = "start";
     public string Mode { get; init; } = "regular";
@@ -38,7 +38,7 @@ public sealed class CaptureOptions
             {
                 return MitmIgnoreHosts;
             }
-            var extra = StripLeadingIgnoreCaseFlag(MitmIgnoreHosts).Trim();
+            string extra = StripLeadingIgnoreCaseFlag(MitmIgnoreHosts).Trim();
             return extra.Length == 0
                 ? $"(?i){DefaultIgnoreHostsPattern}"
                 : $"(?i)(?:{DefaultIgnoreHostsPattern})|(?:{extra})";
@@ -51,114 +51,134 @@ public sealed class CaptureOptions
     public static CaptureOptions Parse(string[] args)
     {
         var options = new MutableOptions();
-        var index = 0;
-        if (args.Length > 0 && !args[0].StartsWith("-", StringComparison.Ordinal))
+        int index = 0;
+        if (args.Length > 0 && !args[0].StartsWith('-'))
         {
-            options.Command = args[0].ToLowerInvariant();
+            options.Command = args[0];
             index = 1;
         }
 
         while (index < args.Length)
         {
-            var arg = args[index++];
-            switch (arg.ToLowerInvariant())
+            string arg = args[index++];
+            if (!ParseFlag(arg, options) && !ParseValue(arg, args, ref index, options))
             {
-                case "-h":
-                case "--help":
-                case "help":
-                    options.ShowHelp = true;
-                    break;
-                case "--version":
-                    options.ShowVersion = true;
-                    break;
-                case "--mode":
-                    options.Mode = RequireValue(args, ref index, arg).ToLowerInvariant();
-                    break;
-                case "--listen-port":
-                    options.ListenPort = int.Parse(RequireValue(args, ref index, arg), CultureInfo.InvariantCulture);
-                    break;
-                case "--ignore-hosts":
-                    options.IgnoreHosts = RequireValue(args, ref index, arg);
-                    break;
-                case "--mitm-ignore-hosts":
-                    options.MitmIgnoreHosts = RequireValue(args, ref index, arg);
-                    break;
-                case "--mitm-allow-hosts":
-                    options.MitmAllowHosts = RequireValue(args, ref index, arg);
-                    break;
-                case "--no-default-ignore-hosts":
-                    options.NoDefaultIgnoreHosts = true;
-                    break;
-                case "--capture-all-processes":
-                    options.CaptureAllProcesses = true;
-                    break;
-                case "--capture-root":
-                    options.CaptureRoot = RequireValue(args, ref index, arg);
-                    break;
-                case "--no-cert-install":
-                    options.NoCertInstall = true;
-                    break;
-                case "--keep-cert":
-                    options.KeepCert = true;
-                    break;
-                case "--no-update-prompt":
-                    options.NoUpdatePrompt = true;
-                    break;
-                case "--no-analysis-prompts":
-                    options.NoAnalysisPrompts = true;
-                    break;
-                case "--packet-only":
-                    options.PacketOnly = true;
-                    options.RawUdpCapture = true;
-                    break;
-                case "--decode-osc":
-                    options.DecodeOsc = true;
-                    break;
-                case "--no-decode-osc":
-                    options.DecodeOsc = false;
-                    break;
-                case "--store-osc-values":
-                    options.StoreOscValues = true;
-                    break;
-                case "--photon-metadata":
-                    options.PhotonMetadata = true;
-                    break;
-                case "--no-photon-metadata":
-                    options.PhotonMetadata = false;
-                    break;
-                case "--unity-metadata":
-                    options.UnityMetadata = true;
-                    break;
-                case "--no-unity-metadata":
-                    options.UnityMetadata = false;
-                    break;
-                case "--raw-udp-capture":
-                    options.RawUdpCapture = true;
-                    break;
-                case "--no-raw-udp-capture":
-                    options.RawUdpCapture = false;
-                    break;
-                case "--raw-udp-ports":
-                    options.RawUdpPorts = RequireValue(args, ref index, arg);
-                    break;
-                default:
-                    throw new ArgumentException($"Unknown argument '{arg}'.");
+                throw new CaptureArgumentException($"Unknown argument '{arg}'.", nameof(args));
             }
         }
 
-        if (options.Command is not ("start" or "stop"))
+        return !string.Equals(options.Command, "start", StringComparison.OrdinalIgnoreCase) && !string.Equals(options.Command, "stop", StringComparison.OrdinalIgnoreCase)
+            ? throw new CaptureArgumentException("Command must be 'start' or 'stop'.", nameof(args))
+            : !string.Equals(options.Mode, "regular", StringComparison.OrdinalIgnoreCase)
+            ? throw new CaptureArgumentException("--mode local has been removed; only --mode regular is supported.", nameof(args))
+            : options.ListenPort is < 1 or > 65535
+            ? throw new CaptureArgumentException("--listen-port must be between 1 and 65535.", nameof(args))
+            : options.ToImmutable();
+    }
+
+    private static bool ParseFlag(string arg, MutableOptions options)
+    {
+        switch (arg.ToUpperInvariant())
         {
-            throw new ArgumentException("Command must be 'start' or 'stop'.");
+            case "-H":
+            case "--HELP":
+            case "HELP":
+                options.ShowHelp = true;
+                return true;
+            case "--VERSION":
+                options.ShowVersion = true;
+                return true;
+            case "--NO-DEFAULT-IGNORE-HOSTS":
+                options.NoDefaultIgnoreHosts = true;
+                return true;
+            case "--CAPTURE-ALL-PROCESSES":
+                options.CaptureAllProcesses = true;
+                return true;
+            case "--NO-CERT-INSTALL":
+                options.NoCertInstall = true;
+                return true;
+            case "--KEEP-CERT":
+                options.KeepCert = true;
+                return true;
+            case "--NO-UPDATE-PROMPT":
+                options.NoUpdatePrompt = true;
+                return true;
+            case "--NO-ANALYSIS-PROMPTS":
+                options.NoAnalysisPrompts = true;
+                return true;
+            case "--PACKET-ONLY":
+                options.PacketOnly = true;
+                options.RawUdpCapture = true;
+                return true;
+            default:
+                return ParseAnalysisFlag(arg, options);
         }
-        if (options.Mode is not "regular")
+    }
+
+    private static bool ParseAnalysisFlag(string arg, MutableOptions options)
+    {
+        switch (arg.ToUpperInvariant())
         {
-            throw new ArgumentException("--mode local has been removed; only --mode regular is supported.");
+            case "--DECODE-OSC":
+                options.DecodeOsc = true;
+                return true;
+            case "--NO-DECODE-OSC":
+                options.DecodeOsc = false;
+                return true;
+            case "--STORE-OSC-VALUES":
+                options.StoreOscValues = true;
+                return true;
+            case "--PHOTON-METADATA":
+                options.PhotonMetadata = true;
+                return true;
+            case "--NO-PHOTON-METADATA":
+                options.PhotonMetadata = false;
+                return true;
+            case "--UNITY-METADATA":
+                options.UnityMetadata = true;
+                return true;
+            case "--NO-UNITY-METADATA":
+                options.UnityMetadata = false;
+                return true;
+            case "--RAW-UDP-CAPTURE":
+                options.RawUdpCapture = true;
+                return true;
+            case "--NO-RAW-UDP-CAPTURE":
+                options.RawUdpCapture = false;
+                return true;
+            default:
+                return false;
         }
-        if (options.ListenPort is < 1 or > 65535)
+    }
+
+    private static bool ParseValue(string arg, string[] args, ref int index, MutableOptions options)
+    {
+        switch (arg.ToUpperInvariant())
         {
-            throw new ArgumentException("--listen-port must be between 1 and 65535.");
+            case "--MODE":
+                options.Mode = RequireValue(args, ref index, arg);
+                return true;
+            case "--LISTEN-PORT":
+                options.ListenPort = int.Parse(RequireValue(args, ref index, arg), CultureInfo.InvariantCulture);
+                return true;
+            case "--IGNORE-HOSTS":
+                options.IgnoreHosts = RequireValue(args, ref index, arg);
+                return true;
+            case "--MITM-IGNORE-HOSTS":
+                options.MitmIgnoreHosts = RequireValue(args, ref index, arg);
+                return true;
+            case "--MITM-ALLOW-HOSTS":
+                options.MitmAllowHosts = RequireValue(args, ref index, arg);
+                return true;
+            case "--CAPTURE-ROOT":
+                options.CaptureRoot = RequireValue(args, ref index, arg);
+                return true;
+            case "--RAW-UDP-PORTS":
+                options.RawUdpPorts = RequireValue(args, ref index, arg);
+                return true;
+            default:
+                return false;
         }
-        return options.ToImmutable();
     }
 
     public static string Usage(string exeName) =>
@@ -197,14 +217,7 @@ public sealed class CaptureOptions
           --help                     Print this help.
         """;
 
-    private static string RequireValue(string[] args, ref int index, string option)
-    {
-        if (index >= args.Length)
-        {
-            throw new ArgumentException($"{option} requires a value.");
-        }
-        return args[index++];
-    }
+    private static string RequireValue(string[] args, ref int index, string option) => index >= args.Length ? throw new CaptureArgumentException($"{option} requires a value.", nameof(args)) : args[index++];
 
     private sealed class MutableOptions
     {
@@ -234,8 +247,8 @@ public sealed class CaptureOptions
         public CaptureOptions ToImmutable() =>
             new()
             {
-                Command = Command,
-                Mode = Mode,
+                Command = string.Equals(Command, "start", StringComparison.OrdinalIgnoreCase) ? "start" : "stop",
+                Mode = "regular",
                 ListenPort = ListenPort,
                 IgnoreHosts = IgnoreHosts,
                 MitmAllowHosts = MitmAllowHosts,

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="benchmarks/VRChatNetCapture.Benchmarks/VRChatNetCapture.Benchmarks.csproj" />
+  <Project Path="src/VRChatNetCapture.BenchmarkRunner/VRChatNetCapture.BenchmarkRunner.csproj" />
+  <Project Path="src/VRChatNetCapture/VRChatNetCapture.csproj" />
+  <Project Path="tests/VRChatNetCapture.Tests/VRChatNetCapture.Tests.csproj" />
+</Solution>

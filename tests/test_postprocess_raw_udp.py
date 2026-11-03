@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from postprocess_raw_udp import main, read_jsonl
+from vrchat_net_capture.postprocess_raw_udp import main, read_jsonl
 
 
 def osc_string(value: str) -> bytes:
@@ -14,6 +17,20 @@ def osc_string(value: str) -> bytes:
 
 
 class PostprocessRawUdpTests(unittest.TestCase):
+    def test_published_entry_point_works_in_isolated_python(self) -> None:
+        entry_point = Path(__file__).resolve().parents[1] / "src" / "postprocess_raw_udp.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, "-I", str(entry_point), "--capture-dir", tmp],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_read_jsonl_accepts_legacy_pretty_json_objects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "udp-datagrams.jsonl"
@@ -24,7 +41,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
 
             records = read_jsonl(path)
 
-            self.assertEqual([r["packet_number"] for r in records], [1, 2])
+            self.assertEqual([r.get("packet_number") for r in records], [1, 2])
 
     def test_postprocess_decodes_raw_osc_and_photon_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,8 +117,9 @@ def main_with_args(args: list[str]) -> int:
 
     old_argv = sys.argv
     try:
-        sys.argv = ["postprocess_raw_udp.py", *args]
-        return main()
+        sys.argv = ["vrchat_net_capture.postprocess_raw_udp.py", *args]
+        with patch("vrchat_net_capture.postprocess_raw_udp.configure_errors"):
+            return main()
     finally:
         sys.argv = old_argv
 

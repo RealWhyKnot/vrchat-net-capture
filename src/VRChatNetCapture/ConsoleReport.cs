@@ -2,13 +2,13 @@ using System.Reflection;
 
 namespace VRChatNetCapture;
 
-public static class ConsoleReport
+internal static class ConsoleReport
 {
     public static string AppName() => Path.GetFileName(Environment.ProcessPath) ?? "VRChatNetCapture";
 
     public static string Version()
     {
-        var versionPath = Path.Combine(AppContext.BaseDirectory, "version.txt");
+        string versionPath = Path.Combine(AppContext.BaseDirectory, "version.txt");
         return File.Exists(versionPath)
             ? File.ReadAllText(versionPath).Trim()
             : Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
@@ -18,15 +18,15 @@ public static class ConsoleReport
     {
         if (!string.IsNullOrWhiteSpace(cert.Error))
         {
-            Console.Error.WriteLine($"[capture] WARN: {cert.Error}");
+            CaptureLog.Error($"[capture] WARN: {cert.Error}");
         }
         else if (cert.InstalledBySession)
         {
-            Console.WriteLine($"[capture] CA installed for current user: {cert.Thumbprint}");
+            CaptureLog.Info($"[capture] CA installed for current user: {cert.Thumbprint}");
         }
         else if (cert.ExistedBefore)
         {
-            Console.WriteLine($"[capture] CA already trusted for current user: {cert.Thumbprint}");
+            CaptureLog.Info($"[capture] CA already trusted for current user: {cert.Thumbprint}");
         }
     }
 

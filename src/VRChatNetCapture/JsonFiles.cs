@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace VRChatNetCapture;
 
-public static class JsonFiles
+internal static class JsonFiles
 {
     public static readonly JsonSerializerOptions Options = new()
     {
@@ -22,12 +22,5 @@ public static class JsonFiles
         File.WriteAllText(path, JsonSerializer.Serialize(value, Options));
     }
 
-    public static T? Read<T>(string path)
-    {
-        if (!File.Exists(path))
-        {
-            return default;
-        }
-        return JsonSerializer.Deserialize<T>(File.ReadAllText(path));
-    }
+    public static T? Read<T>(string path) => !File.Exists(path) ? default : JsonSerializer.Deserialize<T>(File.ReadAllText(path));
 }

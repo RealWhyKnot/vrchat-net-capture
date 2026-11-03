@@ -43,30 +43,57 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+
       - name: Install tools
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install ruff
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
             Register-PSRepository -Default
           }
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Repository PSGallery
-
-      - name: Restore
-        run: dotnet restore src/VRChatNetCapture/VRChatNetCapture.csproj
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -Repository PSGallery
 
       - name: Lint and test
         shell: pwsh
-        run: ./.github/lint/lint.ps1
+        run: |
+          pwsh -NoProfile -File .github/lint/lint.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build
-        run: dotnet build src/VRChatNetCapture/VRChatNetCapture.csproj --configuration Release --no-restore -warnaserror
+  shell:
+    name: shell checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install shell tools
+        shell: bash
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          shopt -s inherit_errexit
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt
+
+      - name: Set up actionlint
+        uses: raven-actions/actionlint@v2
+
+      - name: Run shell gate
+        shell: bash
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          shopt -s inherit_errexit
+          bash .githooks/check-shell

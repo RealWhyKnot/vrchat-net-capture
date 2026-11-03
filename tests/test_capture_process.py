@@ -1,22 +1,39 @@
 from __future__ import annotations
 
-import os
+import json
 import socket
 import struct
+import sys
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
+from unittest.mock import patch
 
-from capture_process import (
+from mitmproxy.proxy.server_hooks import ServerConnectionHookData
+from mitmproxy.tls import TlsData
+from typing_extensions import override
+
+from tests.flow_fixtures import client, hello, make_http_flow, stream_flow
+from vrchat_net_capture import capture_process
+from vrchat_net_capture.capture_addon import CaptureAddon
+from vrchat_net_capture.capture_process import (
+    Address,
     CaptureProcessFilter,
     ProcessEntry,
+    ProcessEntryNative,
     find_owner_pid,
     is_capture_process,
     parse_process_names,
     process_snapshot,
     socket_address,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vrchat_net_capture.capture_schema import CaptureEvent
 
 VRCHAT = frozenset({"vrchat.exe"})
 
@@ -83,7 +100,8 @@ class OwnerLookupTests(unittest.TestCase):
 
 
 class ProcessTreeTests(unittest.TestCase):
-    def check(self, pid: int) -> bool:
+    @staticmethod
+    def check(pid: int) -> bool:
         return is_capture_process(pid, PROCESSES, CREATED.get, VRCHAT)
 
     def test_vrchat_and_its_children_are_captured(self) -> None:
@@ -103,19 +121,29 @@ class ProcessTreeTests(unittest.TestCase):
 
     def test_parent_loops_and_missing_times_fail_closed(self) -> None:
         self.assertFalse(self.check(800))
-        self.assertFalse(is_capture_process(400, PROCESSES, lambda pid: None, VRCHAT))
-        self.assertTrue(is_capture_process(300, PROCESSES, lambda pid: None, VRCHAT))
+        self.assertFalse(is_capture_process(400, PROCESSES, lambda _pid: None, VRCHAT))
+        self.assertTrue(is_capture_process(300, PROCESSES, lambda _pid: None, VRCHAT))
 
 
 class CaptureProcessFilterTests(unittest.TestCase):
     CLIENT = ("127.0.0.1", 50001)
     PROXY = ("127.0.0.1", 8080)
 
-    def make(self, pid: int, **overrides) -> CaptureProcessFilter:
-        table = tcp4_table([(self.CLIENT, self.PROXY, pid)])
-        options = {"table": lambda: table, "processes": lambda: PROCESSES, "created": CREATED.get}
-        options.update(overrides)
-        return CaptureProcessFilter(VRCHAT, **options)
+    def make(
+        self,
+        pid: int,
+        *,
+        table: Callable[[], bytes | None] | None = None,
+        processes: Callable[[], dict[int, ProcessEntry] | None] | None = None,
+        created: Callable[[int], int | None] | None = None,
+    ) -> CaptureProcessFilter:
+        rows = tcp4_table([(self.CLIENT, self.PROXY, pid)])
+        return CaptureProcessFilter(
+            VRCHAT,
+            table=table if table is not None else lambda: rows,
+            processes=processes if processes is not None else lambda: PROCESSES,
+            created=created if created is not None else CREATED.get,
+        )
 
     def test_allows_only_vrchat_connections(self) -> None:
         self.assertTrue(self.make(300).allows(self.CLIENT, self.PROXY))
@@ -123,8 +151,9 @@ class CaptureProcessFilterTests(unittest.TestCase):
         self.assertFalse(self.make(600).allows(self.CLIENT, self.PROXY))
 
     def test_lookup_failures_fail_closed(self) -> None:
-        def boom():
-            raise OSError("no table")
+        def boom() -> bytes:
+            message = "no table"
+            raise OSError(message)
 
         self.assertFalse(self.make(300, table=lambda: None).allows(self.CLIENT, self.PROXY))
         self.assertFalse(self.make(300, table=boom).allows(self.CLIENT, self.PROXY))
@@ -135,9 +164,9 @@ class CaptureProcessFilterTests(unittest.TestCase):
         self.assertFalse(CaptureProcessFilter(frozenset(), table=lambda: b"").allows(self.CLIENT, self.PROXY))
 
     def test_decisions_are_cached_per_process_start(self) -> None:
-        snapshots = []
+        snapshots: list[int] = []
 
-        def processes():
+        def processes() -> dict[int, ProcessEntry]:
             snapshots.append(1)
             return PROCESSES
 
@@ -151,38 +180,38 @@ class CaptureProcessFilterTests(unittest.TestCase):
         self.assertEqual(len(snapshots), 2)
 
 
-@unittest.skipUnless(os.name == "nt", "uses the Windows TCP table")
+@unittest.skipUnless(sys.platform == "win32", "Windows structure layout")
+class ProcessEntryLayoutTests(unittest.TestCase):
+    def test_native_process_entry_matches_windows_abi(self) -> None:
+        entry = ProcessEntryNative()
+        entry.size = 568
+        entry.process_id = 300
+        entry.parent_process_id = 200
+        entry.executable_name = "VRChat.exe"
+        serialized = bytes(entry)
+        self.assertEqual(len(serialized), 568)
+        self.assertEqual(struct.unpack_from("<I", serialized, 0)[0], 568)
+        self.assertEqual(struct.unpack_from("<I", serialized, 8)[0], 300)
+        self.assertEqual(struct.unpack_from("<I", serialized, 32)[0], 200)
+        self.assertEqual(serialized[44:64].decode("utf-16-le"), "VRChat.exe")
+
+
 class WindowsLookupTests(unittest.TestCase):
-    def test_finds_this_process_as_the_owner_of_a_loopback_connection(self) -> None:
-        with socket.socket() as server:
-            server.bind(("127.0.0.1", 0))
-            server.listen()
-            with socket.socket() as client:
-                client.connect(server.getsockname())
-                accepted, _ = server.accept()
-                with accepted:
-                    peer, local = accepted.getpeername(), accepted.getsockname()
-                    snapshot = process_snapshot()
-                    self.assertIsNotNone(snapshot)
-                    own_name = frozenset({snapshot[os.getpid()].name.lower()})
-                    self.assertTrue(CaptureProcessFilter(own_name).allows(peer, local))
-                    self.assertFalse(CaptureProcessFilter(VRCHAT).allows(peer, local))
+    def test_tcp_table_failure_returns_none(self) -> None:
+        with patch("vrchat_net_capture.capture_process._windll") as library:
+            library.return_value.GetExtendedTcpTable.return_value = 5
+            self.assertIsNone(capture_process.tcp4_table())
+
+    def test_process_snapshot_failure_returns_none(self) -> None:
+        with patch("vrchat_net_capture.capture_process._kernel32") as library:
+            library.return_value.CreateToolhelp32Snapshot.return_value = 0
+            self.assertIsNone(process_snapshot())
 
 
-def load_addon_module():
-    try:
-        import mitmproxy  # noqa: F401
-    except ImportError:
-        import sys
-
-        stub = SimpleNamespace(
-            ctx=SimpleNamespace(log=SimpleNamespace(error=lambda *a: None, info=lambda *a: None)),
-            http=SimpleNamespace(HTTPFlow=object),
-        )
-        sys.modules.setdefault("mitmproxy", stub)
-    import capture_addon
-
-    return capture_addon
+@dataclass
+class FilterSettings:
+    capture_all_processes: bool = True
+    capture_processes: str = "Curl.exe"
 
 
 class FakeFilter:
@@ -192,22 +221,21 @@ class FakeFilter:
         self.allowed_ports = allowed_ports
         self.calls = 0
 
-    def allows(self, client, proxy) -> bool:
+    def allows(self, client: Address | None, proxy: Address | None) -> bool:
+        del proxy
         self.calls += 1
         return client is not None and client[1] in self.allowed_ports
 
 
-def client(port: int) -> SimpleNamespace:
-    return SimpleNamespace(id=f"client-{port}", peername=("127.0.0.1", port), sockname=("127.0.0.1", 8080))
-
-
 class AddonProcessFilterTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
-        module = load_addon_module()
-        self.module = module
+        clock = patch("vrchat_net_capture.capture_events.time.time", return_value=1.0)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
-        self.addon = module.CaptureAddon()
+        self.addon = CaptureAddon()
         self.addon.capture_dir = root
         self.addon.bodies_dir = root / "bodies"
         self.addon.decoded_dir = root / "decoded"
@@ -221,92 +249,73 @@ class AddonProcessFilterTests(unittest.TestCase):
         self.vrchat = client(50001)
         self.other = client(50002)
 
+    @override
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def hello(self, conn) -> SimpleNamespace:
-        return SimpleNamespace(
-            context=SimpleNamespace(client=conn, server=None),
-            client_hello=SimpleNamespace(sni="example.com", alpn_protocols=[]),
-            ignore_connection=False,
-        )
-
-    def flow(self, conn) -> SimpleNamespace:
-        return SimpleNamespace(
-            id="flow",
-            client_conn=conn,
-            server_conn=None,
-            request=SimpleNamespace(pretty_host="example.com", pretty_url="https://example.com/", path="/"),
-            response=None,
-            error=None,
-            messages=[SimpleNamespace(content=b"secret", from_client=True, timestamp=1.0)],
-        )
+    def event_kinds(self) -> list[str]:
+        path = Path(self.tmp.name) / "events.jsonl"
+        if not path.exists():
+            return []
+        events = [cast("CaptureEvent", json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
+        return [event["kind"] for event in events]
 
     def test_other_programs_tls_is_passed_through_undecrypted(self) -> None:
-        data = self.hello(self.other)
+        data = hello(self.other)
         self.addon.tls_clienthello(data)
         self.assertTrue(data.ignore_connection)
-        self.assertEqual(self.addon._events, [])
+        self.assertEqual(self.event_kinds(), [])
 
     def test_vrchat_tls_is_still_intercepted(self) -> None:
-        data = self.hello(self.vrchat)
+        data = hello(self.vrchat)
         self.addon.tls_clienthello(data)
         self.assertFalse(data.ignore_connection)
-        self.assertEqual([e["kind"] for e in self.addon._events], ["tls_clienthello"])
+        self.assertEqual(self.event_kinds(), ["tls_clienthello"])
 
     def test_capture_all_processes_intercepts_everything(self) -> None:
         self.addon.capture_all_processes = True
-        data = self.hello(self.other)
+        data = hello(self.other)
         self.addon.tls_clienthello(data)
         self.assertFalse(data.ignore_connection)
         self.assertEqual(self.filter.calls, 0)
 
     def test_process_options_apply_before_the_proxy_starts(self) -> None:
-        original = self.module.ctx
-        self.module.ctx = SimpleNamespace(
-            options=SimpleNamespace(capture_all_processes=True, capture_processes="Curl.exe"), log=None
-        )
-        try:
+        with patch("vrchat_net_capture.capture_addon.capture_settings", return_value=FilterSettings()):
             self.addon.configure({"capture_all_processes", "capture_processes"})
-        finally:
-            self.module.ctx = original
         self.assertTrue(self.addon.capture_all_processes)
         self.assertEqual(self.addon.process_filter.names, frozenset({"curl.exe"}))
-        data = self.hello(self.other)
+        data = hello(self.other)
         self.addon.tls_clienthello(data)
         self.assertFalse(data.ignore_connection)
 
     def test_other_programs_are_not_recorded(self) -> None:
-        recorded = []
-        original = self.module.build_http_record
-        self.module.build_http_record = lambda *a, **k: recorded.append(a) or {}
-        try:
+        context = hello(self.other).context
+        with patch("vrchat_net_capture.capture_recorder.build_http_record") as recorded:
             self.addon.client_connected(self.other)
-            self.addon.http_connect(self.flow(self.other))
-            self.addon.requestheaders(self.flow(self.other))
-            self.addon.response(self.flow(self.other))
-            self.addon.error(self.flow(self.other))
-            self.addon.tcp_message(self.flow(self.other))
-            self.addon.tcp_end(self.flow(self.other))
-            self.addon.server_connect(SimpleNamespace(client=self.other, server=None))
-            self.addon.tls_failed_client(SimpleNamespace(context=SimpleNamespace(client=self.other), conn=None))
+            self.addon.http_connect(make_http_flow(self.other))
+            self.addon.requestheaders(make_http_flow(self.other))
+            self.addon.response(make_http_flow(self.other))
+            self.addon.error(make_http_flow(self.other))
+            self.addon.tcp_message(stream_flow(self.other))
+            self.addon.tcp_end(stream_flow(self.other))
+            self.addon.server_connect(ServerConnectionHookData(context.server, self.other))
+            self.addon.tls_failed_client(TlsData(self.other, context))
             self.addon.client_disconnected(self.other)
-        finally:
-            self.module.build_http_record = original
-        self.assertEqual(recorded, [])
-        self.assertEqual(self.addon._events, [])
-        self.assertFalse(self.addon.events_jsonl.exists())
-        self.assertFalse(self.addon.streams_dir.exists())
+        recorded.assert_not_called()
+        self.assertEqual(self.event_kinds(), [])
+        self.assertFalse((Path(self.tmp.name) / "events.jsonl").exists())
+        self.assertFalse((Path(self.tmp.name) / "streams").exists())
 
     def test_vrchat_events_are_recorded_and_lookups_cached_per_connection(self) -> None:
         self.addon.client_connected(self.vrchat)
-        self.addon.server_connect(SimpleNamespace(client=self.vrchat, server=None))
-        self.addon.tls_clienthello(self.hello(self.vrchat))
+        self.addon.server_connect(ServerConnectionHookData(hello(self.vrchat).context.server, self.vrchat))
+        self.addon.tls_clienthello(hello(self.vrchat))
         self.addon.client_disconnected(self.vrchat)
-        kinds = [e["kind"] for e in self.addon._events]
+        kinds = self.event_kinds()
         self.assertEqual(kinds, ["client_connected", "server_connect", "tls_clienthello", "client_disconnected"])
         self.assertEqual(self.filter.calls, 1)
-        self.assertEqual(self.addon._clients, {})
+        self.addon.client_connected(self.vrchat)
+        self.assertEqual(self.filter.calls, 2)
 
 
 if __name__ == "__main__":

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from capture_records import REDACTED
-from capture_vrchat_logs import mark_unmatched_log_urls, newest_output_log, parse_vrchat_log
+from vrchat_net_capture.capture_records import REDACTED
+from vrchat_net_capture.capture_vrchat_logs import (
+    LogUrlEvent,
+    mark_unmatched_log_urls,
+    newest_output_log,
+    parse_vrchat_log,
+)
 
 
 class VrchatLogTests(unittest.TestCase):
@@ -13,12 +19,10 @@ class VrchatLogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
             path.write_text(
-                "\n".join(
-                    [
-                        "[String Download] Attempting to load String from URL 'https://example.test/catalog.json'",
-                        "[Video Playback] URL 'https://video.test/master.m3u8' resolved",
-                        "ordinary log line",
-                    ]
+                (
+                    "[String Download] Attempting to load String from URL 'https://example.test/catalog.json'\n"
+                    "[Video Playback] URL 'https://video.test/master.m3u8' resolved\n"
+                    "ordinary log line"
                 ),
                 encoding="utf-8",
             )
@@ -26,25 +30,30 @@ class VrchatLogTests(unittest.TestCase):
             events = parse_vrchat_log(path)
 
         self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]["category"], "string_download")
-        self.assertEqual(events[0]["url"], "https://example.test/catalog.json")
-        self.assertEqual(events[1]["category"], "video_playback")
+        self.assertEqual(events[0].get("category"), "string_download")
+        self.assertEqual(events[0].get("url"), "https://example.test/catalog.json")
+        self.assertEqual(events[1].get("category"), "video_playback")
 
     def test_parse_redacts_token_query_params(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
             path.write_text(
-                "[String Download] Attempting to load String from URL "
-                "'https://worlds.example.test/do_auth?token=secret-token&id=7'\n",
+                (
+                    "[String Download] Attempting to load String from URL "
+                    "'https://worlds.example.test/do_auth?token=secret-token&id=7'\n"
+                ),
                 encoding="utf-8",
             )
 
             events = parse_vrchat_log(path)
 
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["url"], f"https://worlds.example.test/do_auth?token={REDACTED}&id=7")
-        self.assertNotIn("secret-token", events[0]["line"])
-        self.assertIn(f"do_auth?token={REDACTED}&id=7'", events[0]["line"])
+        self.assertEqual(events[0].get("url"), f"https://worlds.example.test/do_auth?token={REDACTED}&id=7")
+        line = events[0].get("line")
+        if line is None:
+            self.fail("Missing log line")
+        self.assertNotIn("secret-token", line)
+        self.assertIn(f"do_auth?token={REDACTED}&id=7'", line)
 
     def test_parse_keeps_punctuation_after_redacted_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -53,19 +62,19 @@ class VrchatLogTests(unittest.TestCase):
 
             events = parse_vrchat_log(path)
 
-        self.assertEqual(events[0]["url"], f"https://cdn.example.test/v?sig=1&auth={REDACTED}")
-        self.assertEqual(events[0]["line"], f"Loaded (https://cdn.example.test/v?sig=1&auth={REDACTED}).")
+        self.assertEqual(events[0].get("url"), f"https://cdn.example.test/v?sig=1&auth={REDACTED}")
+        self.assertEqual(events[0].get("line"), f"Loaded (https://cdn.example.test/v?sig=1&auth={REDACTED}).")
 
     def test_mark_unmatched_urls(self) -> None:
-        events = [
+        events: list[LogUrlEvent] = [
             {"url": "https://matched.test/a"},
             {"url": "https://missing.test/b"},
         ]
         unmatched = mark_unmatched_log_urls(events, [{"url": "https://matched.test/a"}])
 
         self.assertEqual(len(unmatched), 1)
-        self.assertTrue(events[0]["captured_by_proxy"])
-        self.assertFalse(events[1]["captured_by_proxy"])
+        self.assertTrue(events[0].get("captured_by_proxy"))
+        self.assertFalse(events[1].get("captured_by_proxy"))
 
     def test_newest_output_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,6 +83,8 @@ class VrchatLogTests(unittest.TestCase):
             newer = root / "output_log_2026-06-23_11-00-00.txt"
             older.write_text("old", encoding="utf-8")
             newer.write_text("new", encoding="utf-8")
+            os.utime(older, (1, 1))
+            os.utime(newer, (2, 2))
 
             self.assertEqual(newest_output_log(root), newer)
 

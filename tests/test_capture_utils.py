@@ -5,7 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from capture_utils import (
+from vrchat_net_capture.capture_utils import (
+    HostRecord,
+    ResponseBody,
     append_jsonl,
     decode_response,
     hex_preview,
@@ -16,9 +18,7 @@ from capture_utils import (
     write_per_host,
 )
 
-# Real vr-m.net /1/l/6 (movie lock) response body, transport gzip already stripped. Catalog
-# metadata only (Ratatouille -> lockId 4697); used to check the packed-body dispatch routing.
-_VRM_LOCK_6_PACKED = bytes.fromhex(
+_VRM_LOCK_6_HEX = (
     "01c3ac02201d007901c380065008c2803a00c38002c38008c2806c01c2bc06301ac3804901c29010600d003600c3a403"
     "7042407401c2a407401b010500c3a8022014c2806101c39011c3b01bc3807501c2a406c38046c280220424072019411a"
     "01c2840730194044047c11c2b008c2803200c38003000dc3802d00c38003600b403200c3a0127008c2806901c2b40610"
@@ -28,6 +28,7 @@ _VRM_LOCK_6_PACKED = bytes.fromhex(
     "00c398035018c2802d01c29006400d003700c3a003500e006401c29818c3a018402e01c38006c3a019c3802201c3b7c3"
     "bfc3b000"
 )
+_VRM_LOCK_6_PACKED = bytes.fromhex(_VRM_LOCK_6_HEX)
 
 
 class CaptureUtilsTests(unittest.TestCase):
@@ -55,25 +56,22 @@ class CaptureUtilsTests(unittest.TestCase):
             decoded = root / "decoded"
             decoded.mkdir()
 
-            json_path, json_hint, is_bundle = decode_response(
-                root,
-                decoded,
-                "jsonhash",
-                b'{"name":"Example"}',
-                "application/json",
+            decoded_body = decode_response(
+                root, decoded, ResponseBody("jsonhash", b'{"name":"Example"}', "application/json")
             )
+            json_path = decoded_body.path
+            json_hint = decoded_body.hint
+            is_bundle = decoded_body.is_unity_bundle
             self.assertEqual(json_path, "decoded/jsonhash.json")
             self.assertEqual(json_hint, "json")
             self.assertFalse(is_bundle)
             self.assertEqual(json.loads((root / json_path).read_text(encoding="utf-8"))["name"], "Example")
 
-            m3u8_path, m3u8_hint, _ = decode_response(
-                root,
-                decoded,
-                "m3u8hash",
-                b"#EXTM3U\n#EXT-X-ENDLIST\n",
-                "application/vnd.apple.mpegurl",
+            decoded_body = decode_response(
+                root, decoded, ResponseBody("m3u8hash", b"#EXTM3U\n#EXT-X-ENDLIST\n", "application/vnd.apple.mpegurl")
             )
+            m3u8_path = decoded_body.path
+            m3u8_hint = decoded_body.hint
             self.assertEqual(m3u8_path, "decoded/m3u8hash.m3u8")
             self.assertEqual(m3u8_hint, "EXTM3U")
 
@@ -83,24 +81,28 @@ class CaptureUtilsTests(unittest.TestCase):
             decoded = root / "decoded"
             decoded.mkdir()
 
-            # Packed vr-m body from a vr-m host decodes to JSON.
-            vrm_path, vrm_hint, _ = decode_response(
-                root, decoded, "vrmhash", _VRM_LOCK_6_PACKED, "application/json", host="vr-m.net"
+            decoded_body = decode_response(
+                root, decoded, ResponseBody("vrmhash", _VRM_LOCK_6_PACKED, "application/json", host="vr-m.net")
             )
+            vrm_path = decoded_body.path
+            vrm_hint = decoded_body.hint
             self.assertEqual(vrm_path, "decoded/vrmhash.json")
             self.assertEqual(vrm_hint, "vrm")
             self.assertEqual(json.loads((root / vrm_path).read_text(encoding="utf-8"))["lockId"], 4697)
 
-            # Same bytes from a non-vr-m host are never treated as a packed body.
-            _, other_hint, _ = decode_response(
-                root, decoded, "otherhash", _VRM_LOCK_6_PACKED, "application/json", host="example.com"
+            decoded_body = decode_response(
+                root, decoded, ResponseBody("otherhash", _VRM_LOCK_6_PACKED, "application/json", host="example.com")
             )
+            other_hint = decoded_body.hint
             self.assertNotEqual(other_hint, "vrm")
 
-            # Plain JSON from a vr-m host falls through to the normal JSON branch.
-            plain_path, plain_hint, _ = decode_response(
-                root, decoded, "plainhash", b'{"availableLanguages":["en"]}', "application/json", host="vr-m.net"
+            decoded_body = decode_response(
+                root,
+                decoded,
+                ResponseBody("plainhash", b'{"availableLanguages":["en"]}', "application/json", host="vr-m.net"),
             )
+            plain_path = decoded_body.path
+            plain_hint = decoded_body.hint
             self.assertEqual(plain_path, "decoded/plainhash.json")
             self.assertEqual(plain_hint, "json")
 
@@ -108,7 +110,7 @@ class CaptureUtilsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             by_host = root / "by-host"
-            record = {
+            record: HostRecord = {
                 "flow_id": "abcdef123456",
                 "host": "api.vrchat.cloud",
                 "ts_start": 1_700_000_000.123,

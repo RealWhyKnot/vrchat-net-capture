@@ -5,7 +5,7 @@ using System.Text;
 
 namespace VRChatNetCapture;
 
-public static class ProcessTools
+internal static class ProcessTools
 {
     public static async Task<ProcessResult> RunAsync(
         string fileName,
@@ -26,27 +26,26 @@ public static class ProcessTools
         {
             startInfo.WorkingDirectory = workingDirectory;
         }
-        foreach (var arg in args)
+        foreach (string arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        using Process process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
         Track(process, requireTracked: false);
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
-        var stdoutTask = ReadToEndAsync(process.StandardOutput, stdout, cancellationToken);
-        var stderrTask = ReadToEndAsync(process.StandardError, stderr, cancellationToken);
+        Task stdoutTask = ReadToEndAsync(process.StandardOutput, stdout, cancellationToken);
+        Task stderrTask = ReadToEndAsync(process.StandardError, stderr, cancellationToken);
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
             return new ProcessResult { ExitCode = process.ExitCode, Stdout = stdout.ToString(), Stderr = stderr.ToString() };
         }
-        catch
+        finally
         {
             TryKill(process);
-            throw;
         }
     }
 
@@ -64,11 +63,11 @@ public static class ProcessTools
             RedirectStandardOutput = false,
             RedirectStandardError = false,
         };
-        foreach (var arg in args)
+        foreach (string arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
-        var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        Process process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
         Track(process, requireTracked);
         return process;
     }
@@ -96,11 +95,11 @@ public static class ProcessTools
         {
             startInfo.Verb = "runas";
         }
-        foreach (var arg in args)
+        foreach (string arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
-        var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
+        Process process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Failed to start {fileName}.");
         Track(process, requireTracked);
         return process;
     }
@@ -111,8 +110,14 @@ public static class ProcessTools
         {
             return Process.GetProcessesByName(processName).Length > 0;
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            Trace.TraceError("{0}", ex);
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
             return false;
         }
     }
@@ -124,8 +129,14 @@ public static class ProcessTools
         {
             startTicks = process.StartTime.ToUniversalTime().Ticks;
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            Trace.TraceError("{0}", ex);
+            startTicks = null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
             startTicks = null;
         }
         File.WriteAllText(path, startTicks is null ? $"{process.Id}" : $"{process.Id} {startTicks}");
@@ -137,15 +148,15 @@ public static class ProcessTools
         {
             return null;
         }
-        var fields = File.ReadAllText(pidFile).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length == 0 || !int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var pid))
+        string[] fields = File.ReadAllText(pidFile).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (fields.Length == 0 || !int.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out int pid))
         {
             return null;
         }
         long? startTicks = null;
         if (fields.Length > 1)
         {
-            if (!long.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var ticks))
+            if (!long.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out long ticks))
             {
                 return null;
             }
@@ -157,8 +168,14 @@ public static class ProcessTools
         {
             process = Process.GetProcessById(pid);
         }
-        catch
+        catch (ArgumentException ex)
         {
+            Trace.TraceError("{0}", ex);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
             return null;
         }
         if (IsRecordedProcess(process, startTicks, File.GetLastWriteTimeUtc(pidFile)))
@@ -176,8 +193,14 @@ public static class ProcessTools
         {
             started = process.StartTime.ToUniversalTime();
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            Trace.TraceError("{0}", ex);
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
             return false;
         }
         return startTicks is long ticks ? started.Ticks == ticks : started <= pidFileWrittenUtc;
@@ -195,10 +218,10 @@ public static class ProcessTools
 
     private static async Task ReadToEndAsync(StreamReader reader, StringBuilder output, CancellationToken cancellationToken)
     {
-        var buffer = new char[4096];
+        char[] buffer = new char[4096];
         while (true)
         {
-            var read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+            int read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
                 return;
@@ -209,7 +232,7 @@ public static class ProcessTools
 
     private static void Track(Process process, bool requireTracked)
     {
-        var tracker = ChildProcessTracker.Current;
+        ChildProcessTracker? tracker = ChildProcessTracker.Current;
         if (tracker is null)
         {
             if (requireTracked)
@@ -220,16 +243,25 @@ public static class ProcessTools
             return;
         }
 
+        bool tracked = false;
         try
         {
             tracker.Add(process);
+            tracked = true;
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex) when (!requireTracked)
         {
-            if (requireTracked)
+            Trace.TraceError("{0}", ex);
+        }
+        catch (InvalidOperationException ex) when (!requireTracked)
+        {
+            Trace.TraceError("{0}", ex);
+        }
+        finally
+        {
+            if (!tracked && requireTracked)
             {
                 TryKill(process);
-                throw;
             }
         }
     }
@@ -244,8 +276,13 @@ public static class ProcessTools
                 process.WaitForExit(3000);
             }
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            Trace.TraceError("{0}", ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
         }
     }
 }

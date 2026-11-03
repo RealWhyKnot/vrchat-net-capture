@@ -3,11 +3,27 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Literal, TypedDict
 
-from capture_records import redact_url
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+from vrchat_net_capture.capture_records import redact_url
 
 URL_RE = re.compile(r"https?://[^\s'\"<>]+")
+
+
+LogCategory = Literal["string_download", "image_download", "video_playback", "download", "url"]
+
+
+class LogUrlEvent(TypedDict, total=False):
+    kind: Literal["vrchat_log_url"]
+    line_number: int
+    category: LogCategory
+    url: str | None
+    line: str
+    captured_by_proxy: bool
+    source_log: str
 
 
 def default_vrchat_log_dir() -> Path:
@@ -28,16 +44,16 @@ def newest_output_log(log_dir: Path | None = None) -> Path | None:
     return logs[0] if logs else None
 
 
-def parse_vrchat_log(path: Path) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+def parse_vrchat_log(path: Path) -> list[LogUrlEvent]:
+    events: list[LogUrlEvent] = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
             urls = URL_RE.findall(line)
             if not urls:
                 continue
             category = classify_line(line)
-            for url in urls:
-                events.append(
+            events.extend(
+                LogUrlEvent(
                     {
                         "kind": "vrchat_log_url",
                         "line_number": line_number,
@@ -46,10 +62,12 @@ def parse_vrchat_log(path: Path) -> list[dict[str, Any]]:
                         "line": redact_line(line.rstrip("\r\n")),
                     }
                 )
+                for url in urls
+            )
     return events
 
 
-def classify_line(line: str) -> str:
+def classify_line(line: str) -> LogCategory:
     lowered = line.lower()
     if "[string download]" in lowered:
         return "string_download"
@@ -62,9 +80,11 @@ def classify_line(line: str) -> str:
     return "url"
 
 
-def mark_unmatched_log_urls(events: list[dict[str, Any]], flow_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def mark_unmatched_log_urls(
+    events: list[LogUrlEvent], flow_records: Sequence[Mapping[str, object]]
+) -> list[LogUrlEvent]:
     captured_urls = {str(record.get("url")) for record in flow_records if record.get("url")}
-    unmatched: list[dict[str, Any]] = []
+    unmatched: list[LogUrlEvent] = []
     for event in events:
         matched = event.get("url") in captured_urls
         event["captured_by_proxy"] = matched

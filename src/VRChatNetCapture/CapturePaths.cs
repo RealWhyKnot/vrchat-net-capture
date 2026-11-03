@@ -1,6 +1,6 @@
 namespace VRChatNetCapture;
 
-public sealed class CapturePaths
+internal sealed class CapturePaths
 {
     public CapturePaths(string appDir, string? captureRootOverride)
     {
@@ -23,10 +23,10 @@ public sealed class CapturePaths
     public CaptureSession CreateSession()
     {
         Directory.CreateDirectory(CaptureRoot);
-        var stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-        var captureDir = Path.Combine(CaptureRoot, stamp);
+        string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
+        string captureDir = Path.Combine(CaptureRoot, stamp);
         Directory.CreateDirectory(captureDir);
-        foreach (var name in new[] { "bodies", "decoded", "by-host", "websockets", "streams" })
+        foreach (string? name in new[] { "bodies", "decoded", "by-host", "websockets", "streams" })
         {
             Directory.CreateDirectory(Path.Combine(captureDir, name));
         }

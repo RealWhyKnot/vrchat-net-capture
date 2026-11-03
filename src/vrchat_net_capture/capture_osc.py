@@ -3,22 +3,136 @@ from __future__ import annotations
 import base64
 import struct
 from collections import Counter
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+MAX_BUNDLE_DEPTH = 16
+BUNDLE_HEADER_BYTES = 16
+OscValue = str | int | float | bool | None
 
 
 class OscParseError(ValueError):
     pass
 
 
+class OscArgument(TypedDict, total=False):
+    tag: str
+    type: str
+    size: int
+    value: OscValue
+    redacted: bool
+
+
+class OscMessage(TypedDict):
+    address: str
+    type_tags: str
+    argument_count: int
+    arguments: list[OscArgument]
+
+
+class OscPacket(TypedDict):
+    status: Literal["ok"]
+    size: int
+    message_count: int
+    bundle_count: int
+    messages: list[OscMessage]
+
+
+class OscSummary(TypedDict):
+    packet_count: int
+    directions: dict[str, int]
+    addresses: dict[str, int]
+    type_tags: dict[str, int]
+    errors: dict[str, int]
+
+
+@dataclass
+class _ParseState:
+    include_values: bool
+    messages: list[OscMessage] = field(default_factory=list[OscMessage])
+    bundle_count: int = 0
+
+
+@dataclass
+class _PacketReader:
+    data: bytes
+    offset: int
+    limit: int
+
+    def read_number(self, format_code: str, name: str) -> int | float:
+        size = struct.calcsize(format_code)
+        if self.offset + size > self.limit:
+            message = f"truncated {name}"
+            raise OscParseError(message)
+        value = cast("int | float", struct.unpack_from(format_code, self.data, self.offset)[0])
+        self.offset += size
+        return value
+
+    def read_int32(self) -> int:
+        return int(self.read_number(">i", "int32"))
+
+    def read_string(self) -> str:
+        end = self.data.find(b"\x00", self.offset, self.limit)
+        if end < 0:
+            message = "unterminated OSC string"
+            raise OscParseError(message)
+        raw = self.data[self.offset : end]
+        next_offset = _align4(end + 1)
+        if next_offset > self.limit:
+            message = "truncated OSC string padding"
+            raise OscParseError(message)
+        self.offset = next_offset
+        return raw.decode("utf-8", errors="replace")
+
+    def read_blob(self) -> bytes:
+        size = self.read_int32()
+        if size < 0:
+            message = "negative OSC blob size"
+            raise OscParseError(message)
+        end = self.offset + size
+        if end > self.limit:
+            message = "truncated OSC blob"
+            raise OscParseError(message)
+        next_offset = _align4(end)
+        if next_offset > self.limit:
+            message = "truncated OSC blob padding"
+            raise OscParseError(message)
+        value = self.data[self.offset : end]
+        self.offset = next_offset
+        return value
+
+    def read_argument(self, tag: str, *, include_values: bool) -> OscArgument:
+        formats = {"i": ">i", "h": ">q", "f": ">f", "d": ">d", "t": ">Q"}
+        names = {"i": "int32", "h": "int64", "f": "float32", "d": "float64", "t": "timetag"}
+        if tag in formats:
+            value = self.read_number(formats[tag], "uint64" if tag == "t" else names[tag])
+            return _argument(tag, names[tag], value, include_values=include_values)
+        if tag == "s":
+            return _argument(tag, "string", self.read_string(), include_values=include_values)
+        if tag == "b":
+            blob = self.read_blob()
+            stored = base64.b64encode(blob).decode("ascii")
+            return _argument(tag, "blob", stored, include_values=include_values, size=len(blob))
+        constants: dict[str, OscValue] = {"T": True, "F": False, "N": None, "I": "impulse"}
+        constant_names = {"T": "true", "F": "false", "N": "nil", "I": "impulse"}
+        if tag in constants:
+            return _argument(tag, constant_names[tag], constants[tag], include_values=include_values)
+        message = f"unsupported OSC type tag {tag!r}"
+        raise OscParseError(message)
+
+
 def looks_like_osc_packet(data: bytes) -> bool:
-    return data.startswith(b"/") or data.startswith(b"#bundle\x00")
+    return data.startswith((b"/", b"#bundle\x00"))
 
 
-def decode_osc_packet(data: bytes, include_values: bool = False) -> dict[str, Any] | None:
+def decode_osc_packet(data: bytes, *, include_values: bool = False) -> OscPacket | None:
     if not looks_like_osc_packet(data):
         return None
     state = _ParseState(include_values=include_values)
-    _parse_packet(data, 0, len(data), state, depth=0)
+    _parse_packet(_PacketReader(data, 0, len(data)), state, depth=0)
     return {
         "status": "ok",
         "size": len(data),
@@ -28,26 +142,26 @@ def decode_osc_packet(data: bytes, include_values: bool = False) -> dict[str, An
     }
 
 
-def build_osc_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+def build_osc_summary(records: Sequence[Mapping[str, object]]) -> OscSummary:
     addresses: Counter[str] = Counter()
     tags: Counter[str] = Counter()
     errors: Counter[str] = Counter()
     directions: Counter[str] = Counter()
-
     for record in records:
         directions[str(record.get("direction") or "_unknown")] += 1
-        osc = record.get("osc")
-        if not isinstance(osc, dict):
+        raw_osc = record.get("osc")
+        if not isinstance(raw_osc, dict):
             continue
+        osc = cast("Mapping[str, object]", raw_osc)
         if osc.get("status") != "ok":
             errors[str(osc.get("error") or "decode_error")] += 1
             continue
-        for message in osc.get("messages") or []:
-            if not isinstance(message, dict):
+        for raw_message in cast("Sequence[object]", osc.get("messages") or []):
+            if not isinstance(raw_message, dict):
                 continue
+            message = cast("Mapping[str, object]", raw_message)
             addresses[str(message.get("address") or "_unknown")] += 1
             tags[str(message.get("type_tags") or ",")] += 1
-
     return {
         "packet_count": len(records),
         "directions": dict(sorted(directions.items())),
@@ -57,99 +171,63 @@ def build_osc_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-class _ParseState:
-    def __init__(self, include_values: bool) -> None:
-        self.include_values = include_values
-        self.messages: list[dict[str, Any]] = []
-        self.bundle_count = 0
+def _parse_packet(reader: _PacketReader, state: _ParseState, depth: int) -> None:
+    if depth > MAX_BUNDLE_DEPTH:
+        message = "OSC bundle nesting too deep"
+        raise OscParseError(message)
+    if reader.data[reader.offset : reader.limit].startswith(b"#bundle\x00"):
+        _parse_bundle(reader, state, depth)
+    else:
+        _parse_message(reader, state)
 
 
-def _parse_packet(data: bytes, offset: int, limit: int, state: _ParseState, depth: int) -> int:
-    if depth > 16:
-        raise OscParseError("OSC bundle nesting too deep")
-    if data[offset:limit].startswith(b"#bundle\x00"):
-        return _parse_bundle(data, offset, limit, state, depth)
-    return _parse_message(data, offset, limit, state)
-
-
-def _parse_bundle(data: bytes, offset: int, limit: int, state: _ParseState, depth: int) -> int:
+def _parse_bundle(reader: _PacketReader, state: _ParseState, depth: int) -> None:
     state.bundle_count += 1
-    if offset + 16 > limit:
-        raise OscParseError("truncated OSC bundle")
-    if data[offset : offset + 8] != b"#bundle\x00":
-        raise OscParseError("invalid OSC bundle header")
-    offset += 16
-    while offset < limit:
-        size, offset = _read_int32(data, offset, limit)
+    if reader.offset + BUNDLE_HEADER_BYTES > reader.limit:
+        message = "truncated OSC bundle"
+        raise OscParseError(message)
+    if reader.data[reader.offset : reader.offset + 8] != b"#bundle\x00":
+        message = "invalid OSC bundle header"
+        raise OscParseError(message)
+    reader.offset += BUNDLE_HEADER_BYTES
+    while reader.offset < reader.limit:
+        size = reader.read_int32()
         if size < 0:
-            raise OscParseError("negative OSC bundle element size")
-        end = offset + size
-        if end > limit:
-            raise OscParseError("truncated OSC bundle element")
-        _parse_packet(data, offset, end, state, depth + 1)
-        offset = end
-    return offset
+            message = "negative OSC bundle element size"
+            raise OscParseError(message)
+        end = reader.offset + size
+        if end > reader.limit:
+            message = "truncated OSC bundle element"
+            raise OscParseError(message)
+        _parse_packet(_PacketReader(reader.data, reader.offset, end), state, depth + 1)
+        reader.offset = end
 
 
-def _parse_message(data: bytes, offset: int, limit: int, state: _ParseState) -> int:
-    address, offset = _read_string(data, offset, limit)
+def _parse_message(reader: _PacketReader, state: _ParseState) -> None:
+    address = reader.read_string()
     if not address.startswith("/"):
-        raise OscParseError("OSC address does not start with /")
-    tags, offset = _read_string(data, offset, limit)
+        message = "OSC address does not start with /"
+        raise OscParseError(message)
+    tags = reader.read_string()
     if not tags.startswith(","):
-        raise OscParseError("OSC type tag string does not start with comma")
-
-    args: list[dict[str, Any]] = []
-    for tag in tags[1:]:
-        arg, offset = _read_argument(tag, data, offset, limit, state.include_values)
-        args.append(arg)
-
-    if offset != limit:
-        raise OscParseError("OSC message has trailing bytes")
-
+        message = "OSC type tag string does not start with comma"
+        raise OscParseError(message)
+    arguments = [reader.read_argument(tag, include_values=state.include_values) for tag in tags[1:]]
+    if reader.offset != reader.limit:
+        message = "OSC message has trailing bytes"
+        raise OscParseError(message)
     state.messages.append(
         {
             "address": address,
             "type_tags": tags,
-            "argument_count": len(args),
-            "arguments": args,
+            "argument_count": len(arguments),
+            "arguments": arguments,
         }
     )
-    return offset
 
 
-def _read_argument(tag: str, data: bytes, offset: int, limit: int, include_values: bool) -> tuple[dict[str, Any], int]:
-    if tag == "i":
-        value, offset = _read_int32(data, offset, limit)
-        return _arg(tag, "int32", value, include_values), offset
-    if tag == "h":
-        value, offset = _read_int64(data, offset, limit)
-        return _arg(tag, "int64", value, include_values), offset
-    if tag == "f":
-        value, offset = _read_float32(data, offset, limit)
-        return _arg(tag, "float32", value, include_values), offset
-    if tag == "d":
-        value, offset = _read_float64(data, offset, limit)
-        return _arg(tag, "float64", value, include_values), offset
-    if tag == "s":
-        value, offset = _read_string(data, offset, limit)
-        return _arg(tag, "string", value, include_values), offset
-    if tag == "b":
-        value, offset = _read_blob(data, offset, limit)
-        stored = base64.b64encode(value).decode("ascii")
-        return _arg(tag, "blob", stored, include_values, size=len(value)), offset
-    if tag == "t":
-        value, offset = _read_uint64(data, offset, limit)
-        return _arg(tag, "timetag", value, include_values), offset
-    if tag in ("T", "F", "N", "I"):
-        names = {"T": "true", "F": "false", "N": "nil", "I": "impulse"}
-        value = {"T": True, "F": False, "N": None, "I": "impulse"}[tag]
-        return _arg(tag, names[tag], value, include_values), offset
-    raise OscParseError(f"unsupported OSC type tag {tag!r}")
-
-
-def _arg(tag: str, name: str, value: Any, include_values: bool, size: int | None = None) -> dict[str, Any]:
-    result: dict[str, Any] = {"tag": tag, "type": name}
+def _argument(tag: str, name: str, value: OscValue, *, include_values: bool, size: int | None = None) -> OscArgument:
+    result: OscArgument = {"tag": tag, "type": name}
     if size is not None:
         result["size"] = size
     if include_values:
@@ -157,60 +235,6 @@ def _arg(tag: str, name: str, value: Any, include_values: bool, size: int | None
     else:
         result["redacted"] = True
     return result
-
-
-def _read_string(data: bytes, offset: int, limit: int) -> tuple[str, int]:
-    end = data.find(b"\x00", offset, limit)
-    if end < 0:
-        raise OscParseError("unterminated OSC string")
-    raw = data[offset:end]
-    next_offset = _align4(end + 1)
-    if next_offset > limit:
-        raise OscParseError("truncated OSC string padding")
-    return raw.decode("utf-8", errors="replace"), next_offset
-
-
-def _read_blob(data: bytes, offset: int, limit: int) -> tuple[bytes, int]:
-    size, offset = _read_int32(data, offset, limit)
-    if size < 0:
-        raise OscParseError("negative OSC blob size")
-    end = offset + size
-    if end > limit:
-        raise OscParseError("truncated OSC blob")
-    next_offset = _align4(end)
-    if next_offset > limit:
-        raise OscParseError("truncated OSC blob padding")
-    return data[offset:end], next_offset
-
-
-def _read_int32(data: bytes, offset: int, limit: int) -> tuple[int, int]:
-    if offset + 4 > limit:
-        raise OscParseError("truncated int32")
-    return struct.unpack(">i", data[offset : offset + 4])[0], offset + 4
-
-
-def _read_int64(data: bytes, offset: int, limit: int) -> tuple[int, int]:
-    if offset + 8 > limit:
-        raise OscParseError("truncated int64")
-    return struct.unpack(">q", data[offset : offset + 8])[0], offset + 8
-
-
-def _read_uint64(data: bytes, offset: int, limit: int) -> tuple[int, int]:
-    if offset + 8 > limit:
-        raise OscParseError("truncated uint64")
-    return struct.unpack(">Q", data[offset : offset + 8])[0], offset + 8
-
-
-def _read_float32(data: bytes, offset: int, limit: int) -> tuple[float, int]:
-    if offset + 4 > limit:
-        raise OscParseError("truncated float32")
-    return struct.unpack(">f", data[offset : offset + 4])[0], offset + 4
-
-
-def _read_float64(data: bytes, offset: int, limit: int) -> tuple[float, int]:
-    if offset + 8 > limit:
-        raise OscParseError("truncated float64")
-    return struct.unpack(">d", data[offset : offset + 8])[0], offset + 8
 
 
 def _align4(value: int) -> int:

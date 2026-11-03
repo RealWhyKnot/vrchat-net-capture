@@ -3,31 +3,28 @@ using Microsoft.Win32;
 
 namespace VRChatNetCapture;
 
-public static class ProxyManager
+internal static partial class ProxyManager
 {
     private const string InternetSettingsPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
     public static ProxySettings Read()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: false)
+        using RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: false)
             ?? throw new InvalidOperationException("Could not open WinINET Internet Settings registry key.");
         return new ProxySettings
         {
-            ProxyEnable = Convert.ToInt32(key.GetValue("ProxyEnable") ?? 0),
+            ProxyEnable = Convert.ToInt32(key.GetValue("ProxyEnable") ?? 0, System.Globalization.CultureInfo.InvariantCulture),
             ProxyServer = key.GetValue("ProxyServer") as string,
             ProxyOverride = key.GetValue("ProxyOverride") as string,
             AutoConfigUrl = key.GetValue("AutoConfigURL") as string,
         };
     }
 
-    public static void Save(string path)
-    {
-        JsonFiles.Write(path, Read());
-    }
+    public static void Save(string path) => JsonFiles.Write(path, Read());
 
     public static void SetLocalProxy(int port)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: true)
+        using RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: true)
             ?? throw new InvalidOperationException("Could not open WinINET Internet Settings registry key.");
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
         key.SetValue("ProxyServer", $"127.0.0.1:{port}", RegistryValueKind.String);
@@ -38,7 +35,7 @@ public static class ProxyManager
 
     public static void Restore(ProxySettings settings)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: true)
+        using RegistryKey key = Registry.CurrentUser.OpenSubKey(InternetSettingsPath, writable: true)
             ?? throw new InvalidOperationException("Could not open WinINET Internet Settings registry key.");
         key.SetValue("ProxyEnable", settings.ProxyEnable, RegistryValueKind.DWord);
         SetOrDelete(key, "ProxyServer", settings.ProxyServer);
@@ -66,6 +63,8 @@ public static class ProxyManager
         InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0);
     }
 
-    [DllImport("wininet.dll", SetLastError = true)]
-    private static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("wininet.dll", EntryPoint = "InternetSetOptionW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 }

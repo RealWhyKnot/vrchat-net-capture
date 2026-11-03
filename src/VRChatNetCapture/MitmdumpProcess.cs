@@ -3,7 +3,7 @@ using System.Net.Sockets;
 
 namespace VRChatNetCapture;
 
-public static class MitmdumpProcess
+internal static class MitmdumpProcess
 {
     public const string PidFileName = ".mitmdump.pid";
 
@@ -25,7 +25,7 @@ public static class MitmdumpProcess
         {
             "--mode", "regular",
             "--listen-host", "127.0.0.1",
-            "--listen-port", options.ListenPort.ToString(),
+            "--listen-port", options.ListenPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
         if (!string.IsNullOrWhiteSpace(options.MitmAllowHosts))
@@ -52,20 +52,21 @@ public static class MitmdumpProcess
         return args;
     }
 
-    public static async Task<bool> WaitForListenerAsync(int port, Process process, TimeSpan timeout)
+    public static async Task<bool> WaitForListenerAsync(int port, Process process, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline && !process.HasExited)
+        long started = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(started) < timeout && !process.HasExited)
         {
             try
             {
                 using var client = new TcpClient();
-                await client.ConnectAsync("127.0.0.1", port).ConfigureAwait(false);
+                await client.ConnectAsync("127.0.0.1", port, cancellationToken).ConfigureAwait(false);
                 return true;
             }
-            catch
+            catch (SocketException ex)
             {
-                await Task.Delay(250).ConfigureAwait(false);
+                Trace.TraceError("{0}", ex);
+                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
             }
         }
         return false;
@@ -73,32 +74,42 @@ public static class MitmdumpProcess
 
     public static void StopForSession(string sessionDir)
     {
-        using var process = ProcessTools.OpenRecordedProcess(Path.Combine(sessionDir, PidFileName));
+        using Process? process = ProcessTools.OpenRecordedProcess(Path.Combine(sessionDir, PidFileName));
         if (process is null)
         {
             return;
         }
         try
         {
-            Console.WriteLine($"[capture] killing mitmdump pid={process.Id}");
+            CaptureLog.Info($"[capture] killing mitmdump pid={process.Id}");
             process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            Trace.TraceError("{0}", ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceError("{0}", ex);
         }
     }
 
     public static void StopStrayProcesses()
     {
-        foreach (var process in Process.GetProcessesByName("mitmdump"))
+        foreach (Process process in Process.GetProcessesByName("mitmdump"))
         {
             try
             {
-                Console.WriteLine($"[capture] killing stray mitmdump pid={process.Id}");
+                CaptureLog.Info($"[capture] killing stray mitmdump pid={process.Id}");
                 process.Kill(entireProcessTree: true);
             }
-            catch
+            catch (System.ComponentModel.Win32Exception ex)
             {
+                Trace.TraceError("{0}", ex);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Trace.TraceError("{0}", ex);
             }
         }
     }

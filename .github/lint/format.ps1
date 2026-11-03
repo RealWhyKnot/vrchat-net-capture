@@ -1,41 +1,47 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-Set-Location $RepoRoot
+Set-StrictMode -Version Latest
 
 function Invoke-Native {
-    param([string]$Name, [scriptblock]$Command)
+    [CmdletBinding()]
+    [OutputType([void])]
+    param([string] $Name, [scriptblock] $Command)
     Write-Host "== $Name"
     & $Command
     if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
 }
 
-& git config --local core.hooksPath .githooks
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '../..')).Path
+$pythonPaths = @(
+    'src/vrchat_net_capture', 'src/capture_addon.py', 'src/postprocess_raw_udp.py', 'tests'
+)
+Push-Location -LiteralPath $repoRoot
+try {
+    Invoke-Native -Name 'ruff format' -Command { uv run --frozen ruff format @pythonPaths }
+    Invoke-Native -Name 'ruff fix' -Command { uv run --frozen ruff check --fix @pythonPaths }
+    Invoke-Native -Name 'dotnet format' -Command { dotnet format VRChatNetCapture.slnx --no-restore }
 
-Invoke-Native 'ruff format' { python -m ruff format . }
-Invoke-Native 'ruff fix' { python -m ruff check --fix . }
-Invoke-Native 'dotnet format' { dotnet format src/VRChatNetCapture/VRChatNetCapture.csproj }
-
-if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
-    Import-Module PSScriptAnalyzer
-    $psFiles = @(
-        & git ls-files '*.ps1' '*.psm1' '*.psd1'
-        & git ls-files --others --exclude-standard '*.ps1' '*.psm1' '*.psd1'
-    ) | Where-Object { $_ }
-    foreach ($file in $psFiles) {
-        $path = Join-Path $RepoRoot $file
-        if (-not (Test-Path -LiteralPath $path)) { continue }
-        $text = [System.IO.File]::ReadAllText($path) -replace "`r`n?", "`n"
-        $formatted = Invoke-Formatter -ScriptDefinition $text
-        if ($formatted -ne $text) {
-            [System.IO.File]::WriteAllText($path, $formatted, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "Formatted $file"
+    if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
+        Import-Module -Name PSScriptAnalyzer
+        $settings = Join-Path -Path $PSScriptRoot -ChildPath 'PSScriptAnalyzerSettings.psd1'
+        $files = @('build.ps1', '.github/lint/format.ps1', '.github/lint/lint.ps1')
+        foreach ($file in $files) {
+            $path = Join-Path -Path $repoRoot -ChildPath $file
+            $text = [IO.File]::ReadAllText($path)
+            $formatted = Invoke-Formatter -ScriptDefinition $text -Settings $settings
+            if ($formatted -ne $text) {
+                [IO.File]::WriteAllText($path, $formatted)
+                Write-Host "Formatted $file"
+            }
         }
+    } else {
+        Write-Warning 'PSScriptAnalyzer is not installed; skipped PowerShell formatting.'
     }
+} finally {
+    Pop-Location
 }
-else {
-    Write-Warning 'PSScriptAnalyzer is not installed; skipped PowerShell formatting.'
-}
+exit 0
