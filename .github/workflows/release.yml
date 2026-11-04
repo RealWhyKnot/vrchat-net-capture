@@ -135,6 +135,7 @@ jobs:
           tag: ${{ steps.release_tag.outputs.tag }}
           notes-file: ${{ steps.notes.outputs.path }}
           prerelease: ${{ steps.release_tag.outputs.prerelease }}
+          draft-first: 'true'
           assets: |
             ${{ steps.zip.outputs.path }}
             ${{ steps.zip.outputs.integrity }}
