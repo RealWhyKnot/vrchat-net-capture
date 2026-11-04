@@ -1,5 +1,6 @@
 #:package Microsoft.CodeAnalysis.CSharp@5.9.0
 #:property RootNamespace=Lint
+#:property PublishAot=false
 
 using System.Diagnostics;
 using System.Text.Json;

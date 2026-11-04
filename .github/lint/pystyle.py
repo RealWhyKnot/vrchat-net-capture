@@ -418,7 +418,8 @@ def check_file(path: Path, root: Path) -> FileCheck:
     has_aioble = any(name.startswith("aioble") for name in aliases.values())
     check = FileCheck(path=path, aliases=aliases, is_firmware="firmware" in parts, has_aioble=has_aioble)
     visit(check, tree, Scope())
-    if not check.is_firmware and path.name != "__main__.py":
+    acts_on_import = check.is_firmware or "yt_dlp_plugins" in parts[:-1] or path.name == "__main__.py"
+    if not acts_on_import:
         for statement in tree.body:
             check_top_level(check, statement)
     is_in_tests = "tests" in parts[:-1]

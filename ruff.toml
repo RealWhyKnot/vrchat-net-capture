@@ -30,6 +30,7 @@ ignore = [
 
 [lint.per-file-ignores]
 "**/firmware/**" = ["UP", "PTH", "read-whole-file", "write-whole-file"]
+"**/typings/**" = ["error-suffix-on-exception-name"]
 
 [lint.flake8-tidy-imports.banned-api]
 "pytest".msg = "Tests use unittest (PY-20)."
