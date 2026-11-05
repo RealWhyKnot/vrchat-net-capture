@@ -3,3 +3,4 @@
 *.sh.tpl text eol=lf
 *.bash.tpl text eol=lf
 .githooks/* text eol=lf
+.shellcheckrc text eol=lf
