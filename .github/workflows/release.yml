@@ -59,11 +59,9 @@ jobs:
         run: |
           uv sync --frozen
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-            Register-PSRepository -Default
-          }
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -Repository PSGallery
+
+      - name: Set up PSScriptAnalyzer
+        uses: RealWhyKnot/workflows/setup-pssa@v1
 
       - name: Validate
         shell: pwsh
