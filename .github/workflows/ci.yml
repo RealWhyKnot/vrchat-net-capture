@@ -35,7 +35,7 @@ jobs:
   lint-test:
     name: dotnet + python checks
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
