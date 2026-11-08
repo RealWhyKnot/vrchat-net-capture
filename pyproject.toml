@@ -9,7 +9,7 @@ capture = ["mitmproxy==12.3.0; python_version >= '3.12'"]
 
 [dependency-groups]
 dev = [
-    "ruff==0.17.0",
+    "ruff==0.17.4",
     "pyright==1.1.414",
     "mitmproxy==12.3.0; python_version >= '3.12'",
     "mitmproxy==10.4.2; python_version < '3.12'",
