@@ -19,7 +19,7 @@ from vrchat_net_capture.capture_records import REDACTED
 class CaptureEventsTests(unittest.TestCase):
     @override
     def setUp(self) -> None:
-        clock = patch("vrchat_net_capture.capture_events.time.time", return_value=1.0)
+        clock = patch("vrchat_net_capture.capture_events._wall_clock", return_value=1.0)
         clock.start()
         self.addCleanup(clock.stop)
 

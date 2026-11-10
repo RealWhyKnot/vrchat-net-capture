@@ -5,18 +5,18 @@ requires-python = ">=3.10"
 dependencies = ["typing-extensions==4.16.0; python_version >= '3.12'", "typing-extensions==4.11.0; python_version < '3.12'"]
 
 [project.optional-dependencies]
-capture = ["mitmproxy==12.3.0; python_version >= '3.12'"]
+capture = ["mitmproxy==12.3.1; python_version >= '3.12'"]
 
 [dependency-groups]
 dev = [
-    "ruff==0.17.0",
+    "ruff==0.17.4",
     "pyright==1.1.414",
-    "mitmproxy==12.3.0; python_version >= '3.12'",
+    "mitmproxy==12.3.1; python_version >= '3.12'",
     "mitmproxy==10.4.2; python_version < '3.12'",
 ]
 
 [build-system]
-requires = ["setuptools==80.9.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 
 from vrchat_net_capture.capture_records import http_headers, redact_headers, redact_url
 
+_wall_clock = time.time
+
 
 class StreamMessage(Protocol):
     content: bytes
@@ -40,7 +42,7 @@ class StreamMessage(Protocol):
 
 
 def build_event(kind: str, flow: Flow | None = None, **extra: Unpack[EventDetails]) -> CaptureEvent:
-    event: CaptureEvent = {"kind": kind, "ts": time.time()}
+    event: CaptureEvent = {"kind": kind, "ts": _wall_clock()}
     if flow is not None:
         event.update(**flow_identity(flow))
     event.update(**extra)
