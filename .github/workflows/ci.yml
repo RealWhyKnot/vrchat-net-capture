@@ -78,12 +78,21 @@ jobs:
 
       - name: Install shell tools
         shell: bash
+        env:
+          SHFMT_VERSION: 3.12.0
+          SHFMT_SHA256: d9fbb2a9c33d13f47e7618cf362a914d029d02a6df124064fff04fd688a745ea
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
           shopt -s inherit_errexit
-          sudo apt-get update
-          sudo apt-get install -y shellcheck shfmt
+          shellcheck --version
+          download="${RUNNER_TEMP}/shfmt"
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors --max-time 120 \
+            --output "${download}" \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          printf '%s  %s\n' "${SHFMT_SHA256}" "${download}" | sha256sum --check --strict
+          sudo install -m 0755 "${download}" /usr/local/bin/shfmt
+          shfmt --version
 
       - name: Set up actionlint
         uses: raven-actions/actionlint@v2
