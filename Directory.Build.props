@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="AsyncFixer" Version="2.1.0" PrivateAssets="all" />
-    <PackageReference Include="Meziantou.Analyzer" Version="3.0.322" PrivateAssets="all" />
+    <PackageReference Include="Meziantou.Analyzer" Version="3.0.339" PrivateAssets="all" />
     <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.12.1" PrivateAssets="all" />
   </ItemGroup>
 
