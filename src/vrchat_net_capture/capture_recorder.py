@@ -46,6 +46,7 @@ from vrchat_net_capture.capture_vrchat_logs import mark_unmatched_log_urls, newe
 
 class CaptureRecorder:
     def __init__(self) -> None:
+        super().__init__()
         self.capture_dir: Path | None = None
         self.bodies_dir: Path | None = None
         self.decoded_dir: Path | None = None
@@ -201,11 +202,11 @@ class CaptureRecorder:
         unmatched = mark_unmatched_log_urls(events, self._records)
         for event in events:
             event["source_log"] = str(log_path)
-        (self.capture_dir / "vrchat-log-events.jsonl").write_text(
+        _ = (self.capture_dir / "vrchat-log-events.jsonl").write_text(
             "\n".join(json.dumps(e, ensure_ascii=False) for e in events) + ("\n" if events else ""),
             encoding="utf-8",
         )
-        (self.capture_dir / "vrchat-log-unmatched.jsonl").write_text(
+        _ = (self.capture_dir / "vrchat-log-unmatched.jsonl").write_text(
             "\n".join(json.dumps(e, ensure_ascii=False) for e in unmatched) + ("\n" if unmatched else ""),
             encoding="utf-8",
         )
@@ -251,21 +252,23 @@ class CaptureRecorder:
         if self.capture_dir is None:
             raise AssertionError
         self._write_vrchat_log_correlation()
-        (self.capture_dir / "flows.json").write_text(json.dumps(self._records, indent=2), encoding="utf-8")
-        (self.capture_dir / "events.json").write_text(json.dumps(self._events, indent=2), encoding="utf-8")
+        _ = (self.capture_dir / "flows.json").write_text(json.dumps(self._records, indent=2), encoding="utf-8")
+        _ = (self.capture_dir / "events.json").write_text(json.dumps(self._events, indent=2), encoding="utf-8")
         if self.decode_osc:
-            (self.capture_dir / "osc-events.json").write_text(json.dumps(self._osc_records, indent=2), encoding="utf-8")
-            (self.capture_dir / "osc-summary.json").write_text(
+            _ = (self.capture_dir / "osc-events.json").write_text(
+                json.dumps(self._osc_records, indent=2), encoding="utf-8"
+            )
+            _ = (self.capture_dir / "osc-summary.json").write_text(
                 json.dumps(build_osc_summary(self._osc_records), indent=2),
                 encoding="utf-8",
             )
         if self.photon_metadata:
-            (self.capture_dir / "photon-summary.json").write_text(
+            _ = (self.capture_dir / "photon-summary.json").write_text(
                 json.dumps(build_photon_summary(self._photon_records), indent=2),
                 encoding="utf-8",
             )
         summary = build_summary(self._records, self._events)
-        (self.capture_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        _ = (self.capture_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         logging.getLogger(__name__).info(
             "capture_addon: wrote %s flows and %s events", len(self._records), len(self._events)
         )
@@ -281,7 +284,7 @@ class CaptureRecorder:
             raise AssertionError
         payload = websocket_event("websocket_message", flow)
         event, content = payload.event, payload.content
-        write_websocket_payload(self.capture_dir, self.websockets_dir, event, content)
+        _ = write_websocket_payload(self.capture_dir, self.websockets_dir, event, content)
         self._append_event(event)
 
     def _write_stream(self, kind: str, flow: TCPFlow | UDPFlow, suffix: str) -> None:

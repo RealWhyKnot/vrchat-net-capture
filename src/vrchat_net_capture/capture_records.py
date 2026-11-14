@@ -80,7 +80,7 @@ def save_body(bodies_dir: Path, data: bytes, suffix: str = ".bin") -> str:
     h = hashlib.sha256(data).hexdigest()
     path = bodies_dir / f"{h}{suffix}"
     if not path.exists():
-        path.write_bytes(data)
+        _ = path.write_bytes(data)
     return h
 
 
@@ -207,7 +207,7 @@ def write_websocket_payload(capture_dir: Path, payload_dir: Path, event: Capture
     h = hashlib.sha256(content).hexdigest()
     path = payload_dir / f"{h}.ws.bin"
     if not path.exists():
-        path.write_bytes(content)
+        _ = path.write_bytes(content)
     event["payload_hash"] = h
     event["payload_path"] = relative_artifact_path(capture_dir, path)
     return h

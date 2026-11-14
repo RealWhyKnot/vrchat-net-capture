@@ -34,7 +34,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
     def test_read_jsonl_accepts_legacy_pretty_json_objects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "udp-datagrams.jsonl"
-            path.write_text(
+            _ = path.write_text(
                 json.dumps({"packet_number": 1}, indent=2) + "\n" + json.dumps({"packet_number": 2}, indent=2),
                 encoding="utf-8",
             )
@@ -52,8 +52,8 @@ class PostprocessRawUdpTests(unittest.TestCase):
 
             osc_payload = osc_string("/avatar/parameters/Muted") + osc_string(",T")
             photon_payload = b"photon-port-only"
-            (payloads / "osc.udp.bin").write_bytes(osc_payload)
-            (payloads / "photon.udp.bin").write_bytes(photon_payload)
+            _ = (payloads / "osc.udp.bin").write_bytes(osc_payload)
+            _ = (payloads / "photon.udp.bin").write_bytes(photon_payload)
 
             records = [
                 {
@@ -89,7 +89,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
                     "pid_confidence": "none",
                 },
             ]
-            (network / "udp-datagrams.jsonl").write_text(
+            _ = (network / "udp-datagrams.jsonl").write_text(
                 "\n".join(json.dumps(r) for r in records) + "\n",
                 encoding="utf-8",
             )
@@ -113,8 +113,6 @@ class PostprocessRawUdpTests(unittest.TestCase):
 
 
 def main_with_args(args: list[str]) -> int:
-    import sys
-
     old_argv = sys.argv
     try:
         sys.argv = ["vrchat_net_capture.postprocess_raw_udp.py", *args]
@@ -125,4 +123,4 @@ def main_with_args(args: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

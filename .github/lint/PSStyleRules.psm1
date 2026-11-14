@@ -286,6 +286,118 @@ function Get-CommandRecord {
     }
 }
 
+function Test-NativeCommand {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][CommandAst] $Command,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Defined
+    )
+    $name = $Command.GetCommandName()
+    if (-not $name -or $Command.InvocationOperator -eq [TokenKind]::Dot -or $Defined -contains $name) {
+        return $false
+    }
+    if (-not $script:NativeCache.ContainsKey($name)) {
+        $info = @(Get-Command -Name $name -ErrorAction SilentlyContinue)
+        $script:NativeCache[$name] = if ($info.Count -gt 0) {
+            $info[0].CommandType -in 'Application', 'ExternalScript'
+        } else {
+            $name -notmatch '-' -or $name -match '\.(exe|cmd|bat|ps1)$'
+        }
+    }
+    $script:NativeCache[$name]
+}
+
+function Test-ChecksExitCode {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][Ast] $Node
+    )
+    $null -ne $Node.Find({
+            param([Ast] $inner)
+            $inner -is [VariableExpressionAst] -and $inner.VariablePath.UserPath -eq 'LASTEXITCODE'
+        }, $true)
+}
+
+function Get-ExitCodeRecord {
+    [CmdletBinding()]
+    [OutputType([Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.DiagnosticRecord])]
+    param(
+        [Parameter(Mandatory)][CommandAst] $Command
+    )
+    $node = $Command
+    while ($node) {
+        $statement = $node
+        while ($statement.Parent -and -not ($statement.Parent -is [NamedBlockAst] -or
+                $statement.Parent -is [StatementBlockAst])) {
+            $statement = $statement.Parent
+        }
+        if (-not $statement.Parent -or (Test-ChecksExitCode -Node $statement)) {
+            return
+        }
+        $siblings = @($statement.Parent.Statements)
+        $position = [array]::IndexOf($siblings, $statement)
+        if ($position -lt $siblings.Count - 1) {
+            if (Test-ChecksExitCode -Node $siblings[$position + 1]) {
+                return
+            }
+            break
+        }
+        $outer = $statement.Parent.Parent
+        if ($outer -is [ArrayExpressionAst] -or $outer -is [SubExpressionAst] -or $outer -is [IfStatementAst]) {
+            $node = $outer
+        } elseif ($outer -is [ScriptBlockAst] -and $outer.Parent -is [ScriptBlockExpressionAst]) {
+            $node = $outer.Parent
+        } else {
+            break
+        }
+    }
+    New-StyleRecord -Rule 'StyleExitCode' -Extent $Command.Extent -Detail $Command.GetCommandName()
+}
+
+function Get-LiteralPathRecord {
+    [CmdletBinding()]
+    [OutputType([Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.DiagnosticRecord])]
+    param(
+        [Parameter(Mandatory)][CommandAst] $Command
+    )
+    $name = $Command.GetCommandName()
+    if ($script:PathCommands -notcontains $name) {
+        return
+    }
+    $binding = [StaticParameterBinder]::BindCommand($Command, $true)
+    if (-not $binding.BoundParameters.ContainsKey('Path') -or $binding.BoundParameters.ContainsKey('LiteralPath')) {
+        return
+    }
+    $value = $binding.BoundParameters['Path'].Value
+    if ($value -is [StringConstantExpressionAst] -or
+        ($value -is [ExpandableStringExpressionAst] -and $value.Value -match '[*?]') -or
+        ($value -is [VariableExpressionAst] -and $value.VariablePath.UserPath -match '(?:Pattern|Glob)$')) {
+        return
+    }
+    New-StyleRecord -Rule 'StyleLiteralPath' -Extent $value.Extent -Detail $name
+}
+
+function Get-RelativePathRecord {
+    [CmdletBinding()]
+    [OutputType([Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.DiagnosticRecord])]
+    param(
+        [Parameter(Mandatory)][InvokeMemberExpressionAst] $Call
+    )
+    if (-not $Call.Static -or -not ($Call.Expression -is [TypeExpressionAst]) -or -not $Call.Arguments) {
+        return
+    }
+    if ($Call.Expression.TypeName.FullName -notmatch '^(System\.)?IO\.(File|Directory)$') {
+        return
+    }
+    $first = $Call.Arguments[0]
+    $isText = $first -is [StringConstantExpressionAst] -or $first -is [ExpandableStringExpressionAst]
+    if ($isText -and $first.Value -notmatch '^\$' -and -not [IO.Path]::IsPathRooted($first.Value)) {
+        New-StyleRecord -Rule 'StyleRelativePath' -Extent $first.Extent -Detail $first.Value
+    }
+}
+
 function Get-FunctionRecord {
     [CmdletBinding()]
     [OutputType([Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.DiagnosticRecord])]
@@ -350,9 +462,20 @@ function Measure-StyleRule {
         }
     }
 
+    $defined = @(foreach ($node in $all) {
+            if ($node -is [FunctionDefinitionAst]) {
+                $node.Name
+            }
+        })
     foreach ($node in $all) {
         if ($node -is [CommandAst]) {
             Get-CommandRecord -Command $node
+            Get-LiteralPathRecord -Command $node
+            if (Test-NativeCommand -Command $node -Defined $defined) {
+                Get-ExitCodeRecord -Command $node
+            }
+        } elseif ($node -is [InvokeMemberExpressionAst]) {
+            Get-RelativePathRecord -Call $node
         } elseif ($node -is [FunctionDefinitionAst]) {
             Get-FunctionRecord -Function $node
         } elseif ($node -is [FileRedirectionAst]) {
@@ -407,6 +530,12 @@ function Measure-StyleRule {
 }
 
 $script:ParameterCache = @{}
+$script:NativeCache = @{}
+$script:PathCommands = @(
+    'Get-Content', 'Test-Path', 'Get-Item', 'Get-ChildItem', 'Remove-Item', 'Copy-Item', 'Move-Item', 'Rename-Item',
+    'Resolve-Path', 'Convert-Path', 'Get-ItemProperty', 'Import-Csv', 'Export-Csv', 'Get-FileHash', 'Expand-Archive',
+    'Push-Location', 'Set-Location'
+)
 $script:HeaderLines = @('$ErrorActionPreference = ''Stop''', 'Set-StrictMode -Version Latest')
 $script:Messages = @{
     StyleAsciiOnly        = 'PowerShell files are ASCII, with no BOM (PowerShell section 0).'
@@ -431,6 +560,9 @@ $script:Messages = @{
     StyleArrayAppend      = 'Collect into a List or assign the loop output; never += on an array (section 4).'
     StyleSuppression      = 'Fix the code; never suppress a rule inside a file (PowerShell section 1).'
     StyleStringAppend     = 'Build strings in a loop with a StringBuilder, not += (section 4).'
+    StyleExitCode         = 'Check $LASTEXITCODE right after {0} (PS-2).'
+    StyleLiteralPath      = 'Pass this path to {0} with -LiteralPath; -Path reads [ and ] as wildcards (PS-8).'
+    StyleRelativePath     = 'Build ''{0}'' with Join-Path from $PSScriptRoot (PS-8).'
 }
 
 Export-ModuleMember -Function Measure-StyleRule

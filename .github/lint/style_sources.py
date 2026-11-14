@@ -41,6 +41,16 @@ LANGUAGES: dict[str, str] = {
     ".sass": "preprocessed",
     ".less": "preprocessed",
     ".styl": "preprocessed",
+    ".c": "cpp",
+    ".h": "cpp",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hh": "cpp",
+    ".hpp": "cpp",
+    ".hxx": "cpp",
+    ".inl": "cpp",
+    ".ipp": "cpp",
 }
 SHELL_TEMPLATE = re.compile(r"\.(?:sh|bash)\.tpl$")
 SHELL_SHEBANG = re.compile(r"^#![ \t]*\S*/(?:env[ \t]+(?:-\S+[ \t]+)*)?(?:ba|da|k|z)?sh\b")
@@ -58,9 +68,9 @@ HEADER_DIRECTIVES = (
 )
 HEADER_DIRECTIVE = re.compile("|".join(HEADER_DIRECTIVES), re.IGNORECASE)
 
-RUST_SUPPRESSION = re.compile(r"#!?\[\s*(?:allow|expect)\s*\(")
+RUST_SUPPRESSION = re.compile(r"#!?\[\s*(?:(?:allow|expect)\s*\(|rustfmt\s*::\s*skip\b)")
 RUST_CFG_ATTR = re.compile(r"#!?\[\s*cfg_attr\s*\(")
-RUST_ALLOW_INSIDE = re.compile(r"\b(?:allow|expect)\s*\(")
+RUST_ALLOW_INSIDE = re.compile(r"\b(?:allow|expect)\s*\(|\brustfmt\s*::\s*skip\b|\brustfmt_skip\b")
 RUST_TEST_MODULE = re.compile(
     r"#\[\s*cfg\s*\(\s*test\s*\)\s*\](?:\s*#\[[^\]]*\])*\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+\w+\s*\{",
 )
@@ -71,6 +81,13 @@ CSHARP_GENERATED_ATTRIBUTE = re.compile(
 CSHARP_DIRECTIVE = re.compile(
     r"^\s*#\s*(?:pragma\s+warning\s+disable|nullable\s+(?:disable|enable\s+annotations))\b",
 )
+CPP_SUPPRESSION = re.compile(
+    r"\bNOLINT(?:NEXTLINE|BEGIN)?\b|\bclang-format\s+off\b|\bcppcheck-suppress"
+    r"|^[ \t]*#[ \t]*pragma[ \t]+(?:warning[ \t]*\([ \t]*disable\b|(?:GCC|clang)[ \t]+diagnostic[ \t]+ignored\b"
+    r"|system_header\b|diag_suppress\b)",
+    re.MULTILINE,
+)
+CPP_STRING = re.compile(r"""'(?:[^'\\\n]|\\[^'\n]{1,8})'|"(?:[^"\\\n]|\\.)*\"""")
 GENERATED_NAME = re.compile(r"\.(?:g|g\.i|generated)\.cs$|(?:^|/)TemporaryGeneratedFile_[^/]*\.cs$", re.IGNORECASE)
 DESIGNER_NAME = re.compile(r"\.designer\.cs$", re.IGNORECASE)
 
@@ -176,6 +193,14 @@ def check_python(path: str, text: str) -> list[Finding]:
     return findings
 
 
+def check_cpp(path: str, text: str) -> list[Finding]:
+    code = CPP_STRING.sub('""', text)
+    return [
+        Finding(path, code.count("\n", 0, match.start()) + 1, "lint suppression (GEN-4)")
+        for match in CPP_SUPPRESSION.finditer(code)
+    ]
+
+
 def language_of(path: str, text: str) -> str | None:
     name = path.rsplit("/", 1)[-1]
     if SHELL_TEMPLATE.search(name):
@@ -197,6 +222,8 @@ def check_source(path: str, text: str) -> list[Finding]:
         return []
     if language == "preprocessed":
         return [Finding(path, 0, "Sass, Less or Stylus file; write plain CSS (CSS-10)")]
+    if language == "cpp":
+        return check_cpp(path, text)
     findings: list[Finding] = []
     lines = count_lines(text)
     if language == "rust":

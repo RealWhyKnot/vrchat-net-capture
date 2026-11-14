@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+paths = [
+  '''(^|/)vendor/''',
+  '''(^|/)third_party/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.yarn/''',
+  '''((^|/)bin/)''',
+  '''((^|/)obj/)''',
+]

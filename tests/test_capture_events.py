@@ -20,7 +20,7 @@ class CaptureEventsTests(unittest.TestCase):
     @override
     def setUp(self) -> None:
         clock = patch("vrchat_net_capture.capture_events._wall_clock", return_value=1.0)
-        clock.start()
+        _ = clock.start()
         self.addCleanup(clock.stop)
 
     def test_websocket_event_summarizes_latest_message(self) -> None:
@@ -112,4 +112,4 @@ class CaptureEventsTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

@@ -2,3 +2,5 @@ vendor/
 third_party/
 node_modules/
 .yarn/
+bin/
+obj/

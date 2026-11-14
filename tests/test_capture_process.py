@@ -176,7 +176,7 @@ class CaptureProcessFilterTests(unittest.TestCase):
         self.assertFalse(process_filter.allows(self.CLIENT, self.PROXY))
         self.assertEqual(len(snapshots), 1)
         created[600] = 61
-        process_filter.allows(self.CLIENT, self.PROXY)
+        _ = process_filter.allows(self.CLIENT, self.PROXY)
         self.assertEqual(len(snapshots), 2)
 
 
@@ -218,6 +218,7 @@ class FakeFilter:
     names = VRCHAT
 
     def __init__(self, allowed_ports: set[int]) -> None:
+        super().__init__()
         self.allowed_ports = allowed_ports
         self.calls = 0
 
@@ -228,13 +229,21 @@ class FakeFilter:
 
 
 class AddonProcessFilterTests(unittest.TestCase):
+    root = Path()
+    addon = CaptureAddon()
+    filter = FakeFilter(set())
+    vrchat = client(50001)
+    other = client(50002)
+
     @override
     def setUp(self) -> None:
         clock = patch("vrchat_net_capture.capture_events._wall_clock", return_value=1.0)
-        clock.start()
+        _ = clock.start()
         self.addCleanup(clock.stop)
-        self.tmp = tempfile.TemporaryDirectory()
-        root = Path(self.tmp.name)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        self.root = root
         self.addon = CaptureAddon()
         self.addon.capture_dir = root
         self.addon.bodies_dir = root / "bodies"
@@ -249,12 +258,8 @@ class AddonProcessFilterTests(unittest.TestCase):
         self.vrchat = client(50001)
         self.other = client(50002)
 
-    @override
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
-
     def event_kinds(self) -> list[str]:
-        path = Path(self.tmp.name) / "events.jsonl"
+        path = self.root / "events.jsonl"
         if not path.exists():
             return []
         events = [cast("CaptureEvent", json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
@@ -303,8 +308,8 @@ class AddonProcessFilterTests(unittest.TestCase):
             self.addon.client_disconnected(self.other)
         recorded.assert_not_called()
         self.assertEqual(self.event_kinds(), [])
-        self.assertFalse((Path(self.tmp.name) / "events.jsonl").exists())
-        self.assertFalse((Path(self.tmp.name) / "streams").exists())
+        self.assertFalse((self.root / "events.jsonl").exists())
+        self.assertFalse((self.root / "streams").exists())
 
     def test_vrchat_events_are_recorded_and_lookups_cached_per_connection(self) -> None:
         self.addon.client_connected(self.vrchat)
@@ -319,4 +324,4 @@ class AddonProcessFilterTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

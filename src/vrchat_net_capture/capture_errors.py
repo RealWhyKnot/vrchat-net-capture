@@ -25,4 +25,4 @@ def configure_errors(capture_dir: Path) -> None:
 
 def report_error(exception_type: type[BaseException], error: BaseException, trace: TracebackType | None) -> None:
     logging.getLogger(__name__).critical("%s", error, exc_info=(exception_type, error, trace))
-    sys.stderr.write("".join(traceback.format_exception_only(exception_type, error)))
+    _ = sys.stderr.write("".join(traceback.format_exception_only(exception_type, error)))

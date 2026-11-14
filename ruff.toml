@@ -5,6 +5,8 @@ extend-exclude = [
   "third_party",
   "node_modules",
   ".yarn",
+  "bin",
+  "obj",
 ]
 
 [lint]

@@ -83,6 +83,6 @@ class CaptureTransportHooks(CaptureHttpHooks):
 
     def client_disconnected(self, client: Client) -> None:
         allowed = self._client_allowed(client)
-        self._clients.pop(client.id, None)
+        _ = self._clients.pop(client.id, None)
         if allowed:
             self._append_event(build_event("client_disconnected", None, client=str(client)))

@@ -104,6 +104,7 @@ class CaptureProcessFilter:
         processes: Callable[[], dict[int, ProcessEntry] | None] | None = None,
         created: Callable[[int], int | None] | None = None,
     ) -> None:
+        super().__init__()
         self.names = names
         self._table = table or tcp4_table
         self._processes = processes or process_snapshot
@@ -184,6 +185,13 @@ class ProcessEntryNative(ctypes.Structure):
         ("executable_name", ctypes.c_wchar * 260),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.size = ctypes.sizeof(ProcessEntryNative)
+        self.process_id = 0
+        self.parent_process_id = 0
+        self.executable_name = ""
+
 
 def process_snapshot() -> dict[int, ProcessEntry] | None:
     kernel32 = _kernel32()
@@ -194,7 +202,6 @@ def process_snapshot() -> dict[int, ProcessEntry] | None:
         return None
     try:
         entry = ProcessEntryNative()
-        entry.size = ctypes.sizeof(ProcessEntryNative)
         processes: dict[int, ProcessEntry] = {}
         more = kernel32.Process32FirstW(handle, ctypes.byref(entry))
         while more:

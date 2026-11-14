@@ -87,13 +87,13 @@ class CaptureOscTests(unittest.TestCase):
         formats = {"i": "int32", "h": "int64", "f": "float32", "d": "float64", "t": "uint64"}
         for tag, name in formats.items():
             with self.subTest(tag=tag), self.assertRaisesRegex(OscParseError, f"^truncated {name}$"):
-                decode_osc_packet(osc_string("/test") + osc_string(f",{tag}"))
+                _ = decode_osc_packet(osc_string("/test") + osc_string(f",{tag}"))
 
     def test_rejects_malformed_message(self) -> None:
         self.assertTrue(looks_like_osc_packet(b"/bad"))
         with self.assertRaises(OscParseError):
-            decode_osc_packet(b"/bad")
+            _ = decode_osc_packet(b"/bad")
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

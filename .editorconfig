@@ -103,6 +103,9 @@ dotnet_diagnostic.VSTHRD202.severity = none
 dotnet_diagnostic.MA0004.severity = none
 dotnet_diagnostic.MA0040.severity = warning
 dotnet_diagnostic.MA0048.severity = warning
+dotnet_diagnostic.CA1031.severity = warning
+dotnet_diagnostic.CA1852.severity = warning
+dotnet_diagnostic.CA2201.severity = warning
 dotnet_diagnostic.MA0053.severity = warning
 dotnet_diagnostic.MA0155.severity = none
 MA0053.public_class_should_be_sealed = true
@@ -112,11 +115,11 @@ MA0053.exceptions_should_be_sealed = true
 dotnet_diagnostic.CA1515.severity = none
 dotnet_diagnostic.CA2007.severity = none
 
-[{vendor,third_party,node_modules,.yarn}/**]
+[{vendor,third_party,node_modules,.yarn,bin,obj}/**]
 generated_code = true
 ignore = true
 
-[**/{vendor,third_party,node_modules,.yarn}/**]
+[**/{vendor,third_party,node_modules,.yarn,bin,obj}/**]
 generated_code = true
 ignore = true
 

@@ -121,7 +121,7 @@ internal static class CSharpStyle
             string entry = raw.Trim();
             if (entry.StartsWith('/'))
             {
-                prefixes.Add(entry.Trim('/') + "/");
+                prefixes.Add(entry[1..]);
             }
             else if (entry.Length > 0)
             {
@@ -133,7 +133,7 @@ internal static class CSharpStyle
     }
 
     private static bool IsVendored(string path, List<string> prefixes, HashSet<string> names) =>
-        prefixes.Exists(prefix => path.StartsWith(prefix, StringComparison.Ordinal)) || path.Split('/')[..^1].Any(names.Contains);
+        prefixes.Exists(prefix => prefix.EndsWith('/') ? path.StartsWith(prefix, StringComparison.Ordinal) : string.Equals(path, prefix, StringComparison.Ordinal)) || path.Split('/')[..^1].Any(names.Contains);
 
     private static List<string> FindPackageRoots(string root, List<string> own) =>
         [.. own.Where(path => path is "package.json" || path.EndsWith("/package.json", StringComparison.Ordinal))

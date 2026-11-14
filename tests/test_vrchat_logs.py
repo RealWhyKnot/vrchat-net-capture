@@ -18,7 +18,7 @@ class VrchatLogTests(unittest.TestCase):
     def test_parse_url_bearing_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
-            path.write_text(
+            _ = path.write_text(
                 (
                     "[String Download] Attempting to load String from URL 'https://example.test/catalog.json'\n"
                     "[Video Playback] URL 'https://video.test/master.m3u8' resolved\n"
@@ -37,7 +37,7 @@ class VrchatLogTests(unittest.TestCase):
     def test_parse_redacts_token_query_params(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
-            path.write_text(
+            _ = path.write_text(
                 (
                     "[String Download] Attempting to load String from URL "
                     "'https://worlds.example.test/do_auth?token=secret-token&id=7'\n"
@@ -58,7 +58,7 @@ class VrchatLogTests(unittest.TestCase):
     def test_parse_keeps_punctuation_after_redacted_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "output_log_2026-06-23_12-00-00.txt"
-            path.write_text("Loaded (https://cdn.example.test/v?sig=1&auth=secret-token).\n", encoding="utf-8")
+            _ = path.write_text("Loaded (https://cdn.example.test/v?sig=1&auth=secret-token).\n", encoding="utf-8")
 
             events = parse_vrchat_log(path)
 
@@ -81,8 +81,8 @@ class VrchatLogTests(unittest.TestCase):
             root = Path(tmp)
             older = root / "output_log_2026-06-23_10-00-00.txt"
             newer = root / "output_log_2026-06-23_11-00-00.txt"
-            older.write_text("old", encoding="utf-8")
-            newer.write_text("new", encoding="utf-8")
+            _ = older.write_text("old", encoding="utf-8")
+            _ = newer.write_text("new", encoding="utf-8")
             os.utime(older, (1, 1))
             os.utime(newer, (2, 2))
 
@@ -90,4 +90,4 @@ class VrchatLogTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

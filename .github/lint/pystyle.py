@@ -351,8 +351,12 @@ def is_main_exit(statement: ast.stmt) -> bool:
 
 
 def runs_unittest(check: FileCheck, statement: ast.stmt) -> bool:
-    if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+    if not isinstance(statement, ast.Expr | ast.Assign) or not isinstance(statement.value, ast.Call):
         return False
+    if isinstance(statement, ast.Assign):
+        target = statement.targets[0] if len(statement.targets) == 1 else None
+        if not isinstance(target, ast.Name) or target.id != "_":
+            return False
     call = statement.value
     return qualified(call.func, check.aliases) == "unittest.main" and not call.args and not call.keywords
 
@@ -371,7 +375,7 @@ def check_top_level(check: FileCheck, statement: ast.stmt) -> None:
         body = statement.body[0] if len(statement.body) == 1 and not statement.orelse else None
         if check.path.name.startswith("test_"):
             if body is None or not runs_unittest(check, body):
-                check.add(statement, "PY-8", 'test guard is exactly: if __name__ == "__main__": unittest.main()')
+                check.add(statement, "PY-8", "the test guard runs unittest.main(); assign its result to _ if needed")
         elif body is None or not is_main_exit(body):
             check.add(statement, "PY-8", 'the guard is exactly: if __name__ == "__main__": raise SystemExit(main())')
         return
@@ -450,7 +454,7 @@ def is_vendored(relative: str, entries: list[str]) -> bool:
     for entry in entries:
         name = entry.strip("/")
         if entry.startswith("/"):
-            if relative.startswith(name + "/"):
+            if relative.startswith(name + "/") or (not entry.endswith("/") and relative == name):
                 return True
         elif name in parts[:-1]:
             return True

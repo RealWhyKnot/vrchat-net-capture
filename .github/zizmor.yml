@@ -1,0 +1,8 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "RealWhyKnot/*": ref-pin
+        "*": hash-pin
+  self-repository:
+    disable: true

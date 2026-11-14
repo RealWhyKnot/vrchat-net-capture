@@ -71,19 +71,19 @@ def decode_response(capture_dir: Path, decoded_dir: Path, response: ResponseBody
     for m in UNITY_MAGICS:
         if body.startswith(m):
             hexpath = decoded_dir / f"{h}.hex"
-            hexpath.write_text(hex_preview(body), encoding="utf-8")
+            _ = hexpath.write_text(hex_preview(body), encoding="utf-8")
             return DecodedBody(relative_artifact_path(capture_dir, hexpath), m.decode("ascii"), is_unity_bundle=True)
 
     if host in VRM_HOSTS:
         decoded = vrm_try_decode(body)
         if decoded is not None:
             p = decoded_dir / f"{h}.json"
-            p.write_text(json.dumps(json.loads(decoded), indent=2, ensure_ascii=False), encoding="utf-8")
+            _ = p.write_text(json.dumps(json.loads(decoded), indent=2, ensure_ascii=False), encoding="utf-8")
             return DecodedBody(relative_artifact_path(capture_dir, p), "vrm")
 
     if body.startswith(b"#EXTM3U") or "mpegurl" in ctype:
         p = decoded_dir / f"{h}.m3u8"
-        p.write_bytes(body)
+        _ = p.write_bytes(body)
         return DecodedBody(relative_artifact_path(capture_dir, p), "EXTM3U")
 
     decoded = decode_text_response(capture_dir, decoded_dir, response)
@@ -91,7 +91,7 @@ def decode_response(capture_dir: Path, decoded_dir: Path, response: ResponseBody
         return decoded
 
     hexpath = decoded_dir / f"{h}.hex"
-    hexpath.write_text(hex_preview(body), encoding="utf-8")
+    _ = hexpath.write_text(hex_preview(body), encoding="utf-8")
     return DecodedBody(relative_artifact_path(capture_dir, hexpath), f"bin:{magic.hex()}")
 
 
@@ -104,7 +104,7 @@ def decode_text_response(capture_dir: Path, decoded_dir: Path, response: Respons
             text = body.decode("utf-8")
             value = json.loads(text)
             path = decoded_dir / f"{response.digest}.json"
-            path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+            _ = path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
         except (OSError, UnicodeError, json.JSONDecodeError):
             logging.getLogger(__name__).debug("Response decoding failed", exc_info=True)
         else:
@@ -113,7 +113,7 @@ def decode_text_response(capture_dir: Path, decoded_dir: Path, response: Respons
         try:
             text = text if text is not None else body.decode("utf-8", errors="replace")
             path = decoded_dir / f"{response.digest}.txt"
-            path.write_text(text, encoding="utf-8")
+            _ = path.write_text(text, encoding="utf-8")
         except (OSError, UnicodeError):
             logging.getLogger(__name__).debug("Response decoding failed", exc_info=True)
         else:
@@ -143,7 +143,7 @@ def unitypy_peek(
         env = loader(response.content)
         lines = unity_object_lines(env, h)
         p = decoded_dir / f"{h}.unitypy.txt"
-        p.write_text("".join(lines), encoding="utf-8")
+        _ = p.write_text("".join(lines), encoding="utf-8")
         return relative_artifact_path(capture_dir, p)
     except (OSError, ValueError, TypeError, AttributeError, EOFError) as e:
         warn(f"capture_addon: UnityPy peek failed for {h}: {e}")
@@ -152,7 +152,7 @@ def unitypy_peek(
 
 def append_jsonl(path: Path, record: object) -> None:
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _ = f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def write_per_host(by_host_dir: Path, record: HostRecord) -> None:
@@ -165,9 +165,9 @@ def write_per_host(by_host_dir: Path, record: HostRecord) -> None:
     fid = (record["flow_id"] or "")[:8]
     fname = f"{ts}_{ms:03d}__{record['method']}__{record['status'] or 'ERR'}__{slug}__{fid}.json"
     try:
-        (host_dir / fname).write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+        _ = (host_dir / fname).write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
     except OSError:
-        (host_dir / f"{record['flow_id']}.json").write_text(
+        _ = (host_dir / f"{record['flow_id']}.json").write_text(
             json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
@@ -198,7 +198,7 @@ def looks_like_text(body: bytes) -> bool:
     if b"\x00" in sample:
         return False
     try:
-        sample.decode("utf-8")
+        _ = sample.decode("utf-8")
     except UnicodeDecodeError:
         return False
     return True

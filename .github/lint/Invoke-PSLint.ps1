@@ -38,7 +38,9 @@ function Get-VendoredPattern {
                 continue
             }
             $name = [regex]::Escape($entry.Trim('/'))
-            if ($entry.StartsWith('/')) {
+            if ($entry -match '^/.*[^/]$') {
+                "^$name$"
+            } elseif ($entry.StartsWith('/')) {
                 "^$name/"
             } else {
                 "(^|/)$name/"

@@ -6,24 +6,21 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-function Invoke-Native {
-    [CmdletBinding()]
-    [OutputType([void])]
-    param([string] $Name, [scriptblock] $Command)
-    Write-Host "== $Name"
-    & $Command
-    if ($LASTEXITCODE -ne 0) { throw "$Name failed with exit code $LASTEXITCODE" }
-}
-
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '../..')).Path
 $pythonPaths = @(
     'src/vrchat_net_capture', 'src/capture_addon.py', 'src/postprocess_raw_udp.py', 'tests'
 )
 Push-Location -LiteralPath $repoRoot
 try {
-    Invoke-Native -Name 'ruff format' -Command { uv run --frozen ruff format @pythonPaths }
-    Invoke-Native -Name 'ruff fix' -Command { uv run --frozen ruff check --fix @pythonPaths }
-    Invoke-Native -Name 'dotnet format' -Command { dotnet format VRChatNetCapture.slnx --no-restore }
+    Write-Host '== ruff format'
+    uv run --frozen ruff format @pythonPaths
+    if ($LASTEXITCODE -ne 0) { throw "ruff format failed with exit code $LASTEXITCODE" }
+    Write-Host '== ruff fix'
+    uv run --frozen ruff check --fix @pythonPaths
+    if ($LASTEXITCODE -ne 0) { throw "ruff fix failed with exit code $LASTEXITCODE" }
+    Write-Host '== dotnet format'
+    dotnet format VRChatNetCapture.slnx --no-restore
+    if ($LASTEXITCODE -ne 0) { throw "dotnet format failed with exit code $LASTEXITCODE" }
 
     if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
         Import-Module -Name PSScriptAnalyzer

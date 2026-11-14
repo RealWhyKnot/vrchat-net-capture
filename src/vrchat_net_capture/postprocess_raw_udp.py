@@ -25,10 +25,10 @@ class PostprocessOptions:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--capture-dir", required=True)
-    parser.add_argument("--decode-osc", action="store_true")
-    parser.add_argument("--store-osc-values", action="store_true")
-    parser.add_argument("--photon-metadata", action="store_true")
+    _ = parser.add_argument("--capture-dir", required=True)
+    _ = parser.add_argument("--decode-osc", action="store_true")
+    _ = parser.add_argument("--store-osc-values", action="store_true")
+    _ = parser.add_argument("--photon-metadata", action="store_true")
     args = parser.parse_args(namespace=PostprocessOptions())
     configure_errors(Path(args.capture_dir))
     return process_capture(args)
@@ -83,11 +83,11 @@ def write_summaries(
     photon_records: list[AnalysisRecord],
 ) -> None:
     if args.decode_osc:
-        (osc_dir / "osc-summary.json").write_text(
+        _ = (osc_dir / "osc-summary.json").write_text(
             json.dumps(build_osc_summary(osc_records), indent=2), encoding="utf-8"
         )
     if args.photon_metadata:
-        (photon_dir / "photon-summary.json").write_text(
+        _ = (photon_dir / "photon-summary.json").write_text(
             json.dumps(build_photon_summary(photon_records), indent=2),
             encoding="utf-8",
         )

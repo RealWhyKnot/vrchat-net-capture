@@ -31,6 +31,7 @@ ROOT_ONLY_PATTERN = re.compile(r"^(?:eslint|prettier|stylelint)\.config\.[cm]?[j
 LINT_ONLY = frozenset({"PSScriptAnalyzerSettings.psd1"})
 LINT_FILES = LINT_ONLY | frozenset(
     {
+        "approved-suppressions.local.txt",
         "CSharpStyle.cs",
         "Invoke-PSLint.ps1",
         "PSStyleRules.psm1",
