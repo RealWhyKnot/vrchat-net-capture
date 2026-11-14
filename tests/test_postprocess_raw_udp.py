@@ -28,6 +28,7 @@ class PostprocessRawUdpTests(unittest.TestCase):
                 encoding="utf-8",
                 timeout=30,
                 check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
 

@@ -182,6 +182,9 @@ class CaptureProcessFilterTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows structure layout")
 class ProcessEntryLayoutTests(unittest.TestCase):
+    def test_new_process_entry_carries_its_own_size(self) -> None:
+        self.assertEqual(struct.unpack_from("<I", bytes(ProcessEntryNative()), 0)[0], 568)
+
     def test_native_process_entry_matches_windows_abi(self) -> None:
         entry = ProcessEntryNative()
         entry.size = 568
