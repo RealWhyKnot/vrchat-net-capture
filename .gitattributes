@@ -5,3 +5,8 @@
 *.bash.tpl text eol=lf
 .githooks/* text eol=lf
 .shellcheckrc text eol=lf
+*.cs text eol=crlf
+*.csx text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
