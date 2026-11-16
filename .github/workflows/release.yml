@@ -97,6 +97,14 @@ jobs:
           "sha256=$hash" >> $env:GITHUB_OUTPUT
           "name=$($zip.Name)" >> $env:GITHUB_OUTPUT
 
+      - name: Checksums
+        id: checksums
+        uses: RealWhyKnot/workflows/checksums@v1
+        with:
+          archives: ${{ steps.zip.outputs.path }}
+          manifest: "false"
+          sidecar: "true"
+
       - name: Build release notes
         id: notes
         shell: pwsh
@@ -142,3 +150,4 @@ jobs:
           assets: |
             ${{ steps.zip.outputs.path }}
             ${{ steps.zip.outputs.integrity }}
+            ${{ steps.checksums.outputs.sidecars }}
