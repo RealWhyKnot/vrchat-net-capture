@@ -4,11 +4,6 @@ shopt -s inherit_errexit
 
 root=$(git rev-parse --show-toplevel)
 cd "${root}"
-if [[ ${OSTYPE} == msys* || ${OSTYPE} == cygwin* ]]; then
-  windows_root=$(pwd -W)
-  MSYS_NO_PATHCONV=1 exec timeout 600 wsl --distribution "${LINT_WSL_DISTRO:?Set LINT_WSL_DISTRO to your lint distro}" \
-    --cd "${windows_root}" -- bash .github/lint/repo_checks.sh
-fi
 
 require_tool() {
   if ! command -v "${1}" >/dev/null; then
@@ -42,9 +37,7 @@ while IFS= read -r entry || [[ -n ${entry} ]]; do
   entry=${entry%$'\r'}
   [[ -z ${entry} ]] || vendored+=("${entry}")
 done <.github/lint/vendored-paths.txt
-workflows=()
-actions=()
-manifests=()
+workflows=() actions=() manifests=()
 files=$(mktemp)
 scan_directory=''
 trap 'rm -f -- "${files}"; if [[ -n ${scan_directory} ]]; then rm -rf -- "${scan_directory}"; fi' EXIT

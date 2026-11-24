@@ -91,4 +91,4 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           shopt -s inherit_errexit
-          bash .githooks/check-shell
+          bash .github/lint/check-shell

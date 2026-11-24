@@ -106,10 +106,9 @@ Install development dependencies:
 uv sync --frozen
 ```
 
-Run the full gate with shell checks in your WSL distro:
+Run the full gate:
 
 ```powershell
-$env:LINT_WSL_DISTRO = 'Ubuntu'
 bash .githooks/pre-push
 ```
 
