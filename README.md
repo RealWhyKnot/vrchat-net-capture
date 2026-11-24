@@ -11,6 +11,8 @@ your machine.
 Windows only. It drives the Windows system proxy and the Windows certificate
 store.
 
+[Reference](docs/reference.md) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/RealWhyKnot/vrchat-net-capture/issues/new/choose) · [Security](.github/SECURITY.md)
+
 ## Read this before you run it
 
 Active capture changes two things on your machine while it runs. It installs the
@@ -41,7 +43,7 @@ Packet-only mode doesn't install a CA, start mitmproxy or change the proxy.
 ## What you need
 
 - Windows 10 or 11
-- Python 3.11+ from python.org. The Microsoft Store stub doesn't work for this and
+- Python 3.10+ from python.org. The Microsoft Store stub doesn't work for this and
   is skipped on purpose.
 - mitmproxy, for active HTTP capture. The app offers to install it.
 - Administrator rights, only for `--raw-udp-capture`
@@ -76,87 +78,6 @@ Anything you pass to `--mitm-ignore-hosts` is added to that set. If you do want 
 intercept VRChat's own API, `--no-default-ignore-hosts` turns the default off and
 the app warns you that worlds will fail.
 
-### Common options
-
-```powershell
-.\VRChatNetCapture.exe --listen-port 8081
-.\VRChatNetCapture.exe --mitm-ignore-hosts "(?i)^([a-z0-9-]+\.)*example\.test:\d+$"
-.\VRChatNetCapture.exe --ignore-hosts api.vrchat.cloud,assets.vrchat.com
-.\VRChatNetCapture.exe --no-analysis-prompts --no-update-prompt
-.\VRChatNetCapture.exe --decode-osc --store-osc-values
-.\VRChatNetCapture.exe --packet-only --raw-udp-capture
-```
-
-`--ignore-hosts` takes a comma-separated host list and leaves those hosts out of
-what gets written. `--mitm-ignore-hosts` takes a `host:port` regex and stops those
-hosts being intercepted at all. They're easy to mix up. `--help` lists the rest.
-
-With `--raw-udp-capture` the tool also adds the UDP ports the running
-`VRChat.exe` owns to the filter. That helps when VRChat has already opened its
-dynamic ports. Capture workers are tied to the launcher. If mitmdump or the UDP
-worker dies, the whole capture stops.
-
-Mitmproxy's local mode isn't supported on purpose. It redirects the VRChat process
-directly, and that can disrupt a live session.
-
-## Reading a capture
-
-```
-captures/<timestamp>/
-|-- .session.json
-|-- .mitmproxy-cert.json
-|-- .previous-proxy.json          # regular mode only
-|-- flows.jsonl                   # one HTTP flow per line
-|-- flows.json                    # flow array, written at shutdown
-|-- events.jsonl                  # CONNECT/TLS/WebSocket/DNS/TCP/UDP events
-|-- events.json                   # event array, written at shutdown
-|-- summary.json                  # counts by host/status/event/error
-|-- osc-events.jsonl              # optional decoded OSC datagrams
-|-- osc-summary.json              # optional OSC counts by address/type tag
-|-- photon-packets.jsonl          # optional Photon-like UDP metadata
-|-- photon-summary.json           # optional Photon-like UDP counts
-|-- network/realtime-udp.pcapng   # optional passive raw UDP capture
-|-- network/packet-index.jsonl
-|-- network/udp-datagrams.jsonl
-|-- network/payloads/<sha>.udp.bin
-|-- osc/osc-events.jsonl          # optional passive OSC analysis
-|-- photon/photon-packets.jsonl   # optional passive Photon-like metadata
-|-- vrchat-log-events.jsonl       # URL-bearing lines from VRChat's log
-|-- vrchat-log-unmatched.jsonl    # log URLs with no matching captured flow
-|-- bodies/<sha256>.bin
-|-- websockets/<sha256>.ws.bin
-|-- streams/<sha256>.<tcp|udp>.bin
-|-- decoded/<sha256>.json|txt|m3u8|hex
-`-- by-host/<host>/<time>__<METHOD>__<status>__<slug>__<flowid>.json
-```
-
-Start with `summary.json` for the host and status counts, then go to `by-host/`.
-For most purposes VRChat's own hosts are noise. The interesting ones are usually
-whatever doesn't look like VRChat.
-
-Check `vrchat-log-unmatched.jsonl` when something seems to be missing. It lists
-URLs that VRChat's log says it fetched but that never showed up as a captured
-flow. Those are requests where interception failed without an error.
-
-`stop` doesn't run the postprocess step. `summary.json`, `flows.json` and the log
-correlation are written when you stop with Ctrl+C. After a `stop` you only have
-the raw `flows.jsonl`, `events.jsonl`, `by-host/` and `bodies/`.
-
-## Getting a good world capture
-
-1. Close VRChat first if you want the startup traffic.
-2. Start the capture and wait for `READY`.
-3. Join the world fresh, ideally in a new instance.
-4. Let the main UI or catalog finish loading.
-5. Use it. Search, paging, play buttons, thumbnails, anything that should hit the
-   network.
-6. Let something play for a bit.
-7. Leave the world cleanly, then stop the capture.
-
-A typical world capture has one big JSON catalog plus lots of image fetches, HLS
-playlists that point at separate media hosts, an API call per search, and TLS
-failures where a host refused to be intercepted.
-
 ## What it won't do
 
 - Photon payloads aren't decoded. With `--photon-metadata` you get ports, sizes,
@@ -167,7 +88,7 @@ failures where a host refused to be intercepted.
 - OSC values are redacted unless you pass `--store-osc-values`. Decoding is opt-in and
   reads datagrams the backend already saw. It never binds VRChat's OSC ports or
   competes for them.
-- Get past certificate pinning. Some hosts can't be intercepted. Look for
+- It can't get past certificate pinning. Some hosts can't be intercepted. Look for
   `tls_failure_targets` in `summary.json` and TLS errors in `events.jsonl`. If a
   live session mustn't be disturbed at all, use packet-only mode.
 - Unity bundles are archived as-is and detected by magic bytes.
@@ -219,6 +140,10 @@ git push origin vYYYY.M.D.N
 
 Tags can have a `-beta` suffix. The repo hook stamps commit subjects from
 `version.txt`, and the commit-message check rejects duplicate version stamps.
+
+## Bug reports and changes
+
+Open an [issue](https://github.com/RealWhyKnot/vrchat-net-capture/issues/new/choose) for bugs and ideas. Please don't send a pull request without talking to me first. [CONTRIBUTING.md](CONTRIBUTING.md) explains why.
 
 ## License
 

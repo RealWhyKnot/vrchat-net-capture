@@ -1,4 +1,8 @@
-<!-- Linked issue, if any: Closes #__ -->
+## Linked issue
+
+<!-- Link the issue where we agreed on this change. PRs without a prior issue may be closed. -->
+
+Closes #
 
 ## Summary
 
@@ -6,11 +10,12 @@
 
 ## Checklist
 
-- [ ] Run the documented capture script or Python checks before opening a PR.
-- [ ] Updated README or CHANGELOG if behavior/setup changed.
+- [ ] `pwsh -NoProfile -File .github/lint/lint.ps1` passes (style, ruff, pyright, Python tests, .NET format, build and tests).
+- [ ] Updated the README or `docs/reference.md` if behavior or setup changed.
 - [ ] Added or updated tests where the change is risky or user-facing.
+- [ ] Said what I tested, including a capture session if the change touches capture.
 - [ ] No unrelated formatting, build output, or local-only output included.
 
 ## Notes
 
-<!-- Compatibility notes, migration details, screenshots, logs, or release-note context. -->
+<!-- Compatibility notes, migration details, screenshots or logs. -->
